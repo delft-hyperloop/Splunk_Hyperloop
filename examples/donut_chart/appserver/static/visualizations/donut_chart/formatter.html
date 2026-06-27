@@ -1,0 +1,42 @@
+<form class="splunk-formatter-section" section-label="Appearance">
+
+    <splunk-control-group label="Color Scheme" help="Colour palette used for the donut segments">
+        <splunk-select name="{{VIZ_NAMESPACE}}.colorScheme" value="splunk">
+            <option value="splunk">Splunk</option>
+            <option value="vibrant">Vibrant</option>
+            <option value="pastel">Pastel</option>
+        </splunk-select>
+    </splunk-control-group>
+
+    <splunk-control-group label="Inner Radius" help="Controls the donut hole size">
+        <splunk-radio-input name="{{VIZ_NAMESPACE}}.innerRadius" value="medium">
+            <option value="thin">Thin</option>
+            <option value="medium">Medium</option>
+            <option value="thick">Thick</option>
+        </splunk-radio-input>
+    </splunk-control-group>
+
+    <splunk-control-group label="Show Glow" help="Adds a colour glow to each segment">
+        <splunk-radio-input name="{{VIZ_NAMESPACE}}.showGlow" value="true">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+        </splunk-radio-input>
+    </splunk-control-group>
+
+    <splunk-control-group label="Show Legend" help="Display a colour-coded legend below the chart">
+        <splunk-radio-input name="{{VIZ_NAMESPACE}}.showLegend" value="true">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+        </splunk-radio-input>
+    </splunk-control-group>
+
+</form>
+
+<form class="splunk-formatter-section" section-label="Center Label">
+
+    <splunk-control-group label="Center Label" help="Text shown in the center of the donut. Leave empty to show the total value.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.centerLabel" value="">
+        </splunk-text-input>
+    </splunk-control-group>
+
+</form>

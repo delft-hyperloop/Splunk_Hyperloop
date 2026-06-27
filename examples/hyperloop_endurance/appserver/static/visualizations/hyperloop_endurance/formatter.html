@@ -1,0 +1,32 @@
+<form class="splunk-formatter-section" section-label="Dynamics">
+    <splunk-control-group label="Track Length (m)" help="Full track length in metres (reference for distance context).">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.trackLength" value="100">
+        </splunk-text-input>
+    </splunk-control-group>
+</form>
+<form class="splunk-formatter-section" section-label="Temperatures">
+    <splunk-control-group label="HEMS Warn (°C)" help="HEMS/EMS temperature warning threshold.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.tempWarnHems" value="70">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="HEMS Critical (°C)" help="HEMS/EMS temperature critical threshold.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.tempCritHems" value="90">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Motor Warn (°C)" help="Motor temperature warning threshold.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.tempWarnMotor" value="100">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Motor Critical (°C)" help="Motor temperature critical threshold.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.tempCritMotor" value="130">
+        </splunk-text-input>
+    </splunk-control-group>
+</form>
+<form class="splunk-formatter-section" section-label="Appearance">
+    <splunk-control-group label="Color Scheme" help="Dark uses muted purples and teals; Neon uses vivid electrics.">
+        <splunk-select name="{{VIZ_NAMESPACE}}.colorScheme" value="dark">
+            <option value="dark">Dark</option>
+            <option value="neon">Neon</option>
+        </splunk-select>
+    </splunk-control-group>
+</form>

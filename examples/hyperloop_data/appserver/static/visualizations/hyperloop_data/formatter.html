@@ -1,0 +1,44 @@
+<form class="splunk-formatter-section" section-label="Status">
+    <splunk-control-group label="Warn Error (%)" help="Relative error (|actual−setpoint| / |setpoint|) above which a loop is flagged 'tuning'.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.errWarnPct" value="5">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Critical Error (%)" help="Relative error above which a loop is flagged 'unstable'.">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.errCritPct" value="15">
+        </splunk-text-input>
+    </splunk-control-group>
+</form>
+<form class="splunk-formatter-section" section-label="Model">
+    <splunk-control-group label="Auto-rotate" help="Slowly spin the 3D pod model. Dragging always overrides.">
+        <splunk-radio-input name="{{VIZ_NAMESPACE}}.modelAutoRotate" value="true">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+        </splunk-radio-input>
+    </splunk-control-group>
+    <splunk-control-group label="Part Map (JSON)" help="Optional. Map subsystem to a 3D hotspot position, e.g. {&quot;lev&quot;:[0.8,0,0.4]}. Unmapped subsystems auto-arrange.">
+        <splunk-text-area name="{{VIZ_NAMESPACE}}.partMap">
+        </splunk-text-area>
+    </splunk-control-group>
+</form>
+<form class="splunk-formatter-section" section-label="Browse">
+    <splunk-control-group label="Overview heatmap" help="Show a grid of all parameters (coloured by status) above the graphs. Click a cell to graph it.">
+        <splunk-radio-input name="{{VIZ_NAMESPACE}}.showOverview" value="true">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+        </splunk-radio-input>
+    </splunk-control-group>
+    <splunk-control-group label="Row sparklines" help="Show a mini trend preview in each parameter-list row.">
+        <splunk-radio-input name="{{VIZ_NAMESPACE}}.showRowPreview" value="true">
+            <option value="true">On</option>
+            <option value="false">Off</option>
+        </splunk-radio-input>
+    </splunk-control-group>
+</form>
+<form class="splunk-formatter-section" section-label="Appearance">
+    <splunk-control-group label="Color Scheme" help="Dark uses muted purples and teals; Neon uses vivid electrics.">
+        <splunk-select name="{{VIZ_NAMESPACE}}.colorScheme" value="dark">
+            <option value="dark">Dark</option>
+            <option value="neon">Neon</option>
+        </splunk-select>
+    </splunk-control-group>
+</form>

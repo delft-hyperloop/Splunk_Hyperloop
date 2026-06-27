@@ -38,7 +38,15 @@
       "live_ticker",
       "network_topology",
       "arcade_leaderboard",
-      "calendar_heatmap"
+      "calendar_heatmap",
+      "donut_chart"
+    ],
+    "Hyperloop": [
+      "hyperloop_dynamics",
+      "hyperloop_endurance",
+      "hyperloop_tuning",
+      "hyperloop_data",
+      "hyperloop_analysis"
     ]
   },
   "vizs": [
@@ -71,6 +79,12 @@
     "scheduler_health",
     "search_activity",
     "index_storage",
-    "calendar_heatmap"
+    "calendar_heatmap",
+    "donut_chart",
+    "hyperloop_dynamics",
+    "hyperloop_endurance",
+    "hyperloop_tuning",
+    "hyperloop_data",
+    "hyperloop_analysis"
   ]
 }

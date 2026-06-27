@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "harness",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["serve.py", "8099"],
+      "port": 8099
+    }
+  ]
+}

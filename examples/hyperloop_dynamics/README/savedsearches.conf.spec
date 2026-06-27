@@ -1,0 +1,9 @@
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.offsetRange = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.trackLength = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.tempWarnHems = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.tempCritHems = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.tempWarnMotor = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.tempCritMotor = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.airgapMin = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.airgapMax = <string>
+display.visualizations.custom.hyperloop_dynamics.hyperloop_dynamics.colorScheme = <string>

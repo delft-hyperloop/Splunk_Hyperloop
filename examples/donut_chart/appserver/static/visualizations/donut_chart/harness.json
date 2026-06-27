@@ -1,0 +1,31 @@
+{
+  "label": "Donut Chart",
+  "defaultSize": { "width": 500, "height": 380 },
+  "noDataMessage": "Awaiting data — Donut Chart",
+  "dependencies": [],
+  "fields": [
+    { "name": "_numRows", "label": "Rows", "type": "slider", "min": 1, "max": 8, "step": 1, "default": 5 }
+  ],
+  "formatter": [
+    { "name": "colorScheme", "label": "Color Scheme", "type": "select", "options": ["splunk", "vibrant", "pastel"], "default": "splunk" },
+    { "name": "innerRadius", "label": "Inner Radius", "type": "radio", "options": ["thin", "medium", "thick"], "default": "medium" },
+    { "name": "showGlow", "label": "Show Glow", "type": "radio", "options": ["true", "false"], "default": "true" },
+    { "name": "showLegend", "label": "Show Legend", "type": "radio", "options": ["true", "false"], "default": "true" },
+    { "name": "centerLabel", "label": "Center Label", "type": "text", "default": "" }
+  ],
+  "data": {
+    "mode": "multi_row",
+    "columns": ["label", "value"],
+    "rowCountField": "_numRows",
+    "sampleRows": [
+      ["Web Servers", "4200"],
+      ["Databases", "2800"],
+      ["Load Balancers", "1500"],
+      ["Cache Nodes", "900"],
+      ["Message Queues", "650"],
+      ["Worker Nodes", "420"],
+      ["Monitoring", "210"],
+      ["Storage", "180"]
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.errWarnPct = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.errCritPct = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.colorScheme = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.modelAutoRotate = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.partMap = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.showOverview = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.showRowPreview = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.sampleIntervalMs = <string>
+display.visualizations.custom.hyperloop_analysis.hyperloop_analysis.sampleOffsetMs = <string>
