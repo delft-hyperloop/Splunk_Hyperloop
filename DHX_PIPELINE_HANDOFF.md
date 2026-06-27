@@ -40,9 +40,10 @@ needs a messy translation query to bridge the gap.
 
 **Change the producer to emit the canonical contract directly:**
 
-```
+```text
 metric_name = "{dept}.{signal}.{role}"      # lowercase
 ```
+
 - `dept` ∈ **exactly** one of: `sys loc lev prop therm pwr`
 - `role` ∈ `sp | act | gain | out`
 - `signal` = lowercase, no dots, digits ok (e.g. `realcurrent0`)
@@ -59,7 +60,7 @@ department. Drive all of this from a single generated table
 
 ## 1. System architecture (end to end)
 
-```
+```text
 DH-X pod (TwinCAT/CAN)
   → ground station (Rust producer)   ← YOU ARE HERE
     → Kafka broker (2 topics: telemetry_events, telemetry_metrics)
@@ -76,6 +77,7 @@ Kafka/Connect/HEC specifics live in the user's `KafkaTest/` directory
 appears to run in Docker (the C:\Program Files\Splunk path does not exist on the host).
 
 ### Topic / sink behavior (important for payload shape)
+
 - **`telemetry_metrics`** sink: `StringConverter` + `splunk.hec.json.event.formatted=true`.
   → The connector passes your Kafka message **verbatim** to HEC. **You must
   serialize the full HEC metric envelope yourself** (multi-metric format, below).
@@ -90,7 +92,7 @@ appears to run in Docker (the C:\Program Files\Splunk path does not exist on the
 The custom viz (`hyperloop_analysis`) discovers its schema purely from **column
 names** in the Splunk search results. A column is graphed only if it matches:
 
-```
+```text
 tune_{dept}_{name}_{role}
 ```
 
@@ -104,6 +106,7 @@ is the department**, **last token is the role**, **everything between is the nam
 | `name` | free text; lowercase; may contain digits. Avoid extra underscores if possible (they become part of the name, which is fine, but keep it clean). |
 
 Role rendering:
+
 - `sp` + `act` with the **same `{dept}` + `{name}`** → setpoint-vs-actual chart with shaded error band.
 - `gain` → a value chip with a drift sparkline.
 - `out` → a plain trace.
@@ -131,6 +134,7 @@ The six departments and their labels (defined in the viz; do not invent others):
 ## 3. metrics index vs events index (Splunk semantics)
 
 Confirmed from Splunk docs during this session:
+
 - **Metrics index** = continuous numeric **measurements** (queried with `mstats`;
   ~500× faster, ~50% less storage). Values must be numeric.
 - **Events index** = discrete **states / faults / enums / flags / heartbeats / logs**
@@ -139,6 +143,7 @@ Confirmed from Splunk docs during this session:
 The authoritative per-datapoint classification is in
 **`splunk_index_classification.md`** (the project's source of truth). Key resolved
 decisions from that file:
+
 - Control **targets** (LeviZTarget, …) and **PropTargetVelocity** → **METRIC**, role `sp`,
   paired with their actual (`act`).
 - **PID gains** (Kp/Ki/Kd/Kf/Ki_initial) → **EVENT**, role `gain`.
@@ -159,7 +164,8 @@ department names, CamelCase signal, **no role suffix**, and a catch-all
 `sense_and_control` department. Observed departments:
 `levitation, powertrain, propulsion, sense_and_control, thermal`.
 Examples:
-```
+
+```text
 levitation.LeviZ            levitation.LeviZTarget       levitation.LeviPitch
 propulsion.PropVelocity     propulsion.PropTargetVelocity propulsion.PropIaLeft
 powertrain.HvVHigh          powertrain.PTDCLinkVoltage    powertrain.ISORes
@@ -173,6 +179,7 @@ fields: `department`, `datapoint`, `value`, `kind`, `pod_time_us` (+ standard
 Splunk fields).
 
 ### Why this breaks the viz
+
 - `levitation` ≠ `lev`, `propulsion` ≠ `prop`, etc. → dropped by the whitelist.
 - `sense_and_control` is not a department in the markdown → dropped, but it holds
   real data (all motor/EMS/HEMS temps, flows, overheats, duty cycle, barcode).
@@ -183,6 +190,7 @@ Splunk fields).
 ## 5. Target: the canonical contract (what to implement)
 
 ### 5.1 Naming
+
 - **Metrics:** `metric_name = "{dept}.{signal}.{role}"` (all lowercase).
   Splunk turns this into the column `tune_{dept}_{signal}_{role}` via a trivial
   pivot (dots→underscores). No translation logic needed on either side.
@@ -191,6 +199,7 @@ Splunk fields).
   tokens. `value` must be numeric.
 
 ### 5.2 Department remap (apply in the producer)
+
 | current | canonical |
 | --- | --- |
 | `levitation` | `lev` |
@@ -202,7 +211,9 @@ Splunk fields).
 | (system/FSM datapoints) | `sys` |
 
 ### 5.3 Resolve the `sense_and_control` catch-all
+
 Assign each of its datapoints to a real department:
+
 | signal pattern | → department |
 | --- | --- |
 | `Therm*`, `Temp*`, `Flow*`, `Overheat*` | `therm` |
@@ -214,6 +225,7 @@ Assign each of its datapoints to a real department:
 > `loc` or be dropped? Confirm before finalizing.
 
 ### 5.4 Role assignment rules
+
 - Signal name ends in `Target` → role `sp`; its actual counterpart → role `act`
   with the **same** `{dept}.{signalbase}` (e.g. `LeviZTarget`→`lev.z.sp`,
   `LeviZ`→`lev.z.act`). **Watch the inconsistent infix forms**:
@@ -226,13 +238,16 @@ Assign each of its datapoints to a real department:
   **metrics** index.
 
 ### 5.5 Signal name normalization
+
 Lowercase; strip the redundant subsystem prefix where it duplicates the dept
 (e.g. `LeviZ` under `lev` → `z`; `PropVelocity` under `prop` → `velocity`); keep
 trailing array indices (`realcurrent0`). Keep names unique within a department.
 
 ### 5.6 Metrics HEC multi-metric payload (because of `json.event.formatted=true`)
+
 One Kafka message can carry many metrics; encode each as a `metric_name:<name>`
 field:
+
 ```json
 {
   "time": 1750448243.123,
@@ -246,10 +261,13 @@ field:
   }
 }
 ```
+
 (`run_id` with no `metric_name:` prefix is a shared dimension.)
 
 ### 5.7 Events payload (JsonConverter auto-wraps)
+
 Plain JSON object; the connector adds the HEC envelope:
+
 ```json
 {
   "time": 1750448243.123,
@@ -269,13 +287,15 @@ Plain JSON object; the connector adds the HEC envelope:
 Generate **`dp_classification.csv`** from `splunk_index_classification.md`
 (+ the full `GVL_GS_IDS.TcGVL` for the array families). Columns:
 
-```
+```text
 dp_id, department, signal, role, index
 ```
+
 - `department` = one of the 6 canonical tokens (with `sense_and_control` resolved).
 - `index` = `metrics` | `events`.
 
 Both sides consume this one file:
+
 - **Producer:** loads it (or a generated `dp_map.rs`) → `DP_ID → (dept, signal, role, index)` → emits canonical names to the correct topic.
 - **Splunk (already handled in the viz repo):** can use it as a lookup during the
   transition; once the producer is canonical, no lookup is needed.
@@ -322,6 +342,7 @@ Once the producer emits canonical names, the dashboard panel query becomes:
 | stats values(*) AS * by _time
 | sort 0 _time
 ```
+
 - Time range `earliest=0 / latest=now` + `refresh=5s` = accumulate + auto-compress.
 - (If you put any `<`, `>`, `&` in a Simple-XML `<query>`, wrap it in
   `<![CDATA[ … ]]>`. The query above is XML-safe.)
