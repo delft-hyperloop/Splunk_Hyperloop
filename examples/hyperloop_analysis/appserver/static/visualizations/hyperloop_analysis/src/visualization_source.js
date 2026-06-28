@@ -16,7 +16,7 @@ define([
 
     var ROLES = { sp: 1, act: 1, gain: 1, out: 1 };
     // Departments (subsystem token → friendly label + accent colour).
-    var KNOWN_LABELS = { sys: 'System / FSM', loc: 'Localization', lev: 'Levitation', prop: 'Propulsion', therm: 'Thermal', pwr: 'Powertrain' };
+    var KNOWN_LABELS = { sys: 'System / S&C', loc: 'Localization', lev: 'Levitation', prop: 'Propulsion', therm: 'Thermal', pwr: 'Powertrain' };
     var ACCENTS = { sys: '#ADB5BD', loc: '#00B4D8', lev: '#6C5CE7', prop: '#2DC653', therm: '#E63946', pwr: '#F4A261' };
     var CYCLE = ['#6C5CE7', '#2DC653', '#F4A261', '#00B4D8', '#E63946', '#B5179E'];
 
@@ -273,6 +273,281 @@ define([
         { key: 'div', label: 'A ÷ B', kind: 'series', fn: function(a, b) { return (b === 0 || isNaN(b)) ? NaN : a / b; } }
     ];
     function labOp(key) { for (var i = 0; i < LAB_OPS.length; i++) if (LAB_OPS[i].key === key) return LAB_OPS[i]; return LAB_OPS[0]; }
+
+    // ── Multi-series grouped charts ─────────────────────────────────
+    // Curated named presets: many related signals drawn as ONE multi-series chart
+    // instead of one chart each. Each preset matches members within a single
+    // department by a name pattern (`match`) or an explicit `names` list, over the
+    // department's `out` items (or `gain` items when kind:'gain'). This is a curated
+    // preset list (the user opted out of fully-automatic array detection); the regex
+    // is just a compact way to span an array family (realcurrent0…23) without listing
+    // every channel. Setpoint/actual pairs are intentionally NOT grouped.
+    var PRESET_GROUPS = [
+        // Levitation — drive arrays & sensors (24-ch unless noted)
+        { id: 'lev_realcurrents', sub: 'lev', label: 'HEMS real currents', match: /^realcurrents\d+$/, unit: 'A' },
+        { id: 'lev_requestedcurrents', sub: 'lev', label: 'HEMS requested currents', match: /^requestedcurrents\d+$/, unit: 'A' },
+        { id: 'lev_dcbus', sub: 'lev', label: 'DC-bus voltages', match: /^dcbusvoltage\d+$/, unit: 'V' },
+        { id: 'lev_periphery', sub: 'lev', label: 'Periphery voltages', match: /^peripheryvoltage\d+$/, unit: 'V' },
+        { id: 'lev_sensordata', sub: 'lev', label: 'Sensor data', match: /^sensordata\d+$/ },
+        { id: 'lev_offsetairgaps', sub: 'lev', label: 'Per-magnet airgaps', match: /^offsetairgaps\d+$/, unit: 'm' },
+        { id: 'lev_drivestatus', sub: 'lev', label: 'Drive status words', match: /^drivestatus\d+$/ },
+        { id: 'lev_drivediagnostics', sub: 'lev', label: 'Drive diagnostics', match: /^drivediagnostics\d+$/ },
+        { id: 'lev_controlword', sub: 'lev', label: 'Control words', match: /^controlword\d+$/ },
+        { id: 'lev_errorspecifics', sub: 'lev', label: 'Error specifics', match: /^errorspecifics\d+$/ },
+        { id: 'lev_drivefeedbacktimeouts', sub: 'lev', label: 'Feedback timeouts', match: /^drivefeedbacktimeouts\d+$/ },
+        { id: 'lev_drivecurrenterror', sub: 'lev', label: 'Drive current errors', match: /^drivecurrenterror\d+$/ },
+        // Propulsion
+        { id: 'prop_iright', sub: 'prop', label: 'Right phase currents', match: /^(ia|ib|ic|id|iq)right$/, unit: 'A' },
+        { id: 'prop_ileft', sub: 'prop', label: 'Left phase currents', match: /^(ia|ib|ic|id|iq)left$/, unit: 'A' },
+        { id: 'prop_gd', sub: 'prop', label: 'Gate-driver temps', match: /^t[abc]gd(left|right)$/, unit: '°C' },
+        { id: 'prop_vbus', sub: 'prop', label: 'Inverter bus voltages', match: /^vbus(left|right)$/, unit: 'V' },
+        { id: 'prop_angle', sub: 'prop', label: 'Motor angles', match: /^currentangle(left|right)$/, unit: 'deg' },
+        { id: 'prop_position', sub: 'prop', label: 'Position', match: /^position(interpolated)?$/, unit: 'mm' },
+        // Thermal — EMS/HEMS + 4 motor quadrants + coolant flow
+        { id: 'therm_ems', sub: 'therm', label: 'EMS temps', match: /^ems\d+$/, unit: '°C' },
+        { id: 'therm_hems', sub: 'therm', label: 'HEMS temps', match: /^hems\d+$/, unit: '°C' },
+        { id: 'therm_motorlf', sub: 'therm', label: 'Motor L-front temps', match: /^motorleftfront\d+$/, unit: '°C' },
+        { id: 'therm_motorrf', sub: 'therm', label: 'Motor R-front temps', match: /^motorrightfront\d+$/, unit: '°C' },
+        { id: 'therm_motorlb', sub: 'therm', label: 'Motor L-back temps', match: /^motorleftback\d+$/, unit: '°C' },
+        { id: 'therm_motorrb', sub: 'therm', label: 'Motor R-back temps', match: /^motorrightback\d+$/, unit: '°C' },
+        { id: 'therm_flow', sub: 'therm', label: 'Coolant flow', match: /^flow\d+$/, unit: 'L/min' },
+        { id: 'therm_flowarray', sub: 'therm', label: 'Flow array', match: /^flowarray\d+$/, unit: 'L/min' },
+        // Powertrain
+        { id: 'pwr_cellv', sub: 'pwr', label: 'Pack cell V (max/min)', match: /^(max|min)voltage$/, unit: 'V' },
+        { id: 'pwr_packv', sub: 'pwr', label: 'Pack voltages', match: /^(totalvoltage|dclinkvoltage)$/, unit: 'V' },
+        { id: 'pwr_temp', sub: 'pwr', label: 'Pack temp (max/min)', match: /^(max|min)temp$/, unit: '°C' },
+        { id: 'pwr_current', sub: 'pwr', label: 'Pack currents', match: /^(ivtcurrent|packcurrent)$/, unit: 'A' }
+    ];
+    function presetById(id) { for (var i = 0; i < PRESET_GROUPS.length; i++) if (PRESET_GROUPS[i].id === id) return PRESET_GROUPS[i]; return null; }
+
+    // ── Enum / bitmask decoding ─────────────────────────────────────
+    // Discrete event-index signals read poorly as line traces. A signal listed here
+    // renders as a state-timeline band (`enum`) or a per-bit lane grid (`bits`)
+    // instead. Labels come from the GS handoff §5 decode tables; `labels: null`
+    // means "known discrete state, but no name table" → show the raw integer.
+    var ENUM_DECODE = [
+        { sub: 'pwr', name: 'state', kind: 'enum', labels: ['Idle', 'Precharge', 'HV On', 'Failure', 'Discharge'] },
+        { sub: 'pwr', name: 'failreason', kind: 'enum', labels: ['None', 'slaves-not-found', 'no-current-sense', 'mux-test', 'cell-ADC', 'AUX-ADC', 'STAT-ADC', 'PEC-failures', 'timeouts', 'open-wire', 'open-wire-read'] },
+        { sub: 'pwr', name: 'errorstatus', kind: 'bits', labels: ['SDC', 'IMD', 'Contact', 'Precharge', 'FDCAN', 'OV', 'BMS'] },
+        { sub: 'pwr', name: 'imdwarnings', kind: 'bits', labels: ['DevErr', 'HV+ Conn', 'HV- Conn', 'Earth Conn', 'Iso Alarm', 'Iso Warn', 'Iso Outdated', 'Unbalance', 'UV Alarm', 'Unsafe Start', 'Earthlift'] },
+        { sub: 'sys', name: 'podstate', kind: 'enum', labels: null },
+        { sub: 'lev', name: 'state', kind: 'enum', labels: null },
+        { sub: 'lev', name: 'command', kind: 'enum', labels: null },
+        { sub: 'prop', name: 'stateleft', kind: 'enum', labels: null },
+        { sub: 'prop', name: 'stateright', kind: 'enum', labels: null },
+        { sub: 'prop', name: 'flag', kind: 'enum', labels: null }
+    ];
+    function decodeFor(sub, name) {
+        for (var i = 0; i < ENUM_DECODE.length; i++) if (ENUM_DECODE[i].sub === sub && ENUM_DECODE[i].name === name) return ENUM_DECODE[i];
+        return null;
+    }
+    function decodeLabel(decode, v) {
+        if (v == null || isNaN(v)) return '--';
+        v = Math.round(v);
+        if (decode && decode.labels && decode.labels[v] != null) return decode.labels[v];
+        return String(v);
+    }
+    function setBitNames(decode, v) {
+        var out = [], labels = (decode && decode.labels) ? decode.labels : null;
+        if (v == null || isNaN(v)) return out;
+        v = Math.round(v);
+        var nb = labels ? labels.length : 16, b;
+        for (b = 0; b < nb; b++) if ((v >> b) & 1) out.push(labels ? labels[b] : ('b' + b));
+        return out;
+    }
+    // Stable colour for a discrete state value (0 reads as idle/none → neutral grey).
+    function stateColor(v) {
+        if (v == null || isNaN(v)) return 'rgba(255,255,255,0.06)';
+        v = Math.round(v);
+        if (v === 0) return '#5b6470';
+        return CYCLE[(v - 1) % CYCLE.length];
+    }
+
+    // Line colour for series i of n in a multi-series chart. Small groups reuse the
+    // categorical CYCLE; large array families ramp the hue so adjacent channels differ.
+    function seriesColor(i, n) {
+        if (n <= CYCLE.length) return CYCLE[i % CYCLE.length];
+        var hue = Math.round((i / n) * 300);
+        return 'hsl(' + hue + ',72%,62%)';
+    }
+
+    // Natural-order key for a name: its trailing integer (channel index), else -1.
+    function trailingNum(name) { var m = /(\d+)$/.exec(name); return m ? parseInt(m[1], 10) : -1; }
+
+    // Find a department section in the parsed schema.
+    function findSection(schema, sub) {
+        for (var i = 0; i < schema.length; i++) if (schema[i].sub === sub) return schema[i];
+        return null;
+    }
+
+    // Resolve a preset to its concrete members [{name, field, color}], sorted by
+    // channel index. Returns [] if the current schema has none (preset hidden then).
+    function resolvePreset(schema, g) {
+        var sec = findSection(schema, g.sub);
+        if (!sec) return [];
+        var pool = g.kind === 'gain' ? sec.gains : sec.outs;
+        var hits = [], i, it, ok;
+        for (i = 0; i < pool.length; i++) {
+            it = pool[i];
+            ok = g.names ? (g.names.indexOf(it.name) >= 0) : g.match.test(it.name);
+            if (ok) hits.push({ name: it.name, field: it.field });
+        }
+        hits.sort(function(a, b) {
+            var na = trailingNum(a.name), nb = trailingNum(b.name);
+            if (na !== nb) return na - nb;
+            return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+        });
+        for (i = 0; i < hits.length; i++) hits[i].color = seriesColor(i, hits.length);
+        return hits;
+    }
+
+    // Multi-series line chart: N auto-coloured traces sharing one auto-scaled Y axis,
+    // a header (name + channel count), and a compact legend for small groups.
+    function multiChart(ctx, rows, members, name, x, y, w, h, accent) {
+        roundRect(ctx, x, y, w, h, 4);
+        ctx.fillStyle = 'rgba(255,255,255,0.03)';
+        ctx.fill();
+        var n = rows.length, m = members.length, i, j, v;
+        if (n === 0 || m === 0) return;
+        var minV = Infinity, maxV = -Infinity;
+        for (i = 0; i < n; i++) for (j = 0; j < m; j++) {
+            v = rows[i][members[j].field];
+            if (!isNaN(v)) { if (v < minV) minV = v; if (v > maxV) maxV = v; }
+        }
+        if (minV === Infinity) { minV = 0; maxV = 1; }
+        var span = maxV - minV; if (span < 1e-6) span = Math.abs(maxV) > 1e-6 ? Math.abs(maxV) * 0.1 : 1;
+        var pTop = maxV + span * 0.12, pBot = minV - span * 0.12, range = pTop - pBot;
+        var headerH = Math.min(15, Math.max(10, h * 0.22));
+        var pad = Math.min(3, h * 0.05);
+        var axisW = (h >= 40 && w >= 90) ? 28 : 0;
+        var plotX = x + pad + axisW, plotW = w - pad * 2 - axisW, plotY = y + headerH, plotH = h - headerH - pad;
+        if (plotH < 4) plotH = 4;
+        function px(idx) { return plotX + (n > 1 ? (idx / (n - 1)) * plotW : plotW / 2); }
+        function py(val) { return plotY + plotH - ((val - pBot) / range) * plotH; }
+        if (axisW) drawChartYAxis(ctx, plotX, plotW, plotY, plotH, minV, maxV, pBot, range);
+        ctx.save();
+        roundRect(ctx, plotX, plotY, plotW, plotH, 0); ctx.clip();
+        for (j = 0; j < m; j++) {
+            ctx.beginPath();
+            var started = false;
+            for (i = 0; i < n; i++) {
+                v = rows[i][members[j].field]; if (isNaN(v)) continue;
+                if (!started) { ctx.moveTo(px(i), py(v)); started = true; } else ctx.lineTo(px(i), py(v));
+            }
+            ctx.strokeStyle = members[j].color || accent; ctx.lineWidth = 1; ctx.stroke();
+        }
+        ctx.restore();
+        // header: name + channel count
+        var labelFont = Math.min(9, Math.max(7, headerH * 0.62));
+        ctx.font = labelFont + 'px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText(name, x + 4, y + 3);
+        ctx.font = 'bold ' + Math.min(9, Math.max(7, headerH * 0.6)) + 'px monospace';
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.textAlign = 'right';
+        ctx.fillText(m + ' ch', x + w - 4, y + 3);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        // compact legend (small groups only — large arrays would overflow)
+        if (m <= 8 && plotH > 22) {
+            var lx = plotX + 3, ly = plotY + 2;
+            ctx.font = '7px sans-serif'; ctx.textBaseline = 'middle';
+            for (j = 0; j < m; j++) {
+                var lbl = members[j].name;
+                var lw = ctx.measureText(lbl).width + 12;
+                if (lx + lw > plotX + plotW) { lx = plotX + 3; ly += 9; if (ly > plotY + plotH - 4) break; }
+                ctx.fillStyle = members[j].color || accent;
+                ctx.fillRect(lx, ly - 2, 5, 4);
+                ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                ctx.textAlign = 'left';
+                ctx.fillText(lbl, lx + 7, ly);
+                lx += lw;
+            }
+            ctx.textBaseline = 'alphabetic';
+        }
+    }
+
+    // State-timeline band: segment a discrete signal into runs of equal value, each a
+    // coloured block with its decoded label, along the time axis. Reads instantly as
+    // an FSM state-over-time (vs a meaningless sawtooth line).
+    function stateBand(ctx, rows, field, name, x, y, w, h, accent, decode) {
+        roundRect(ctx, x, y, w, h, 4); ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fill();
+        var n = rows.length; if (n === 0) return;
+        var headerH = Math.min(15, Math.max(10, h * 0.22)), pad = Math.min(3, h * 0.05);
+        var plotX = x + pad, plotW = w - pad * 2, plotY = y + headerH, plotH = h - headerH - pad;
+        if (plotH < 3) plotH = 3;
+        function bx(k) { return plotX + (k / n) * plotW; }   // sample k holds until k+1
+        ctx.save(); roundRect(ctx, plotX, plotY, plotW, plotH, 0); ctx.clip();
+        var i = 0;
+        while (i < n) {
+            var v = rows[i][field], j = i + 1;
+            while (j < n && rows[j][field] === v) j++;
+            var x0 = bx(i), x1 = bx(j);
+            ctx.fillStyle = stateColor(v);
+            ctx.fillRect(x0, plotY, Math.max(1, x1 - x0), plotH);
+            var lbl = decodeLabel(decode, v);
+            ctx.font = '8px sans-serif';
+            if (x1 - x0 > ctx.measureText(lbl).width + 6 && plotH > 10) {
+                ctx.fillStyle = 'rgba(255,255,255,0.96)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(lbl, (x0 + x1) / 2, plotY + plotH / 2);
+            }
+            i = j;
+        }
+        ctx.restore();
+        ctx.font = Math.min(9, Math.max(7, headerH * 0.62)) + 'px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText(name, x + 4, y + 3);
+        var cur = rows[n - 1][field];
+        ctx.font = 'bold ' + Math.min(9, Math.max(7, headerH * 0.6)) + 'px sans-serif';
+        ctx.fillStyle = stateColor(cur); ctx.textAlign = 'right';
+        ctx.fillText(decodeLabel(decode, cur), x + w - 4, y + 3);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
+
+    // Bit-lane grid: one row per named bit, lit when that bit is set, over time. Makes
+    // "which fault fired when" obvious for bitmask words (IMD warnings, error status…).
+    function bitLane(ctx, rows, field, name, x, y, w, h, accent, decode) {
+        roundRect(ctx, x, y, w, h, 4); ctx.fillStyle = 'rgba(255,255,255,0.03)'; ctx.fill();
+        var n = rows.length; if (n === 0) return;
+        var labels = (decode && decode.labels) ? decode.labels : null;
+        var nbits = labels ? labels.length : 8, i, b;
+        if (!labels) {   // infer bit count from the largest observed value
+            var mx = 0; for (i = 0; i < n; i++) { var vv = rows[i][field]; if (!isNaN(vv) && vv > mx) mx = vv; }
+            nbits = Math.max(1, Math.floor(Math.log(mx + 1) / Math.LN2) + 1); if (nbits > 16) nbits = 16;
+        }
+        var headerH = Math.min(14, Math.max(9, h * 0.2)), pad = Math.min(3, h * 0.05);
+        var labW = (w >= 120) ? 52 : 0;
+        var plotX = x + pad + labW, plotW = w - pad * 2 - labW, plotY = y + headerH, plotH = h - headerH - pad;
+        if (plotH < 2) plotH = 2;
+        var rowH = plotH / nbits;
+        ctx.save(); roundRect(ctx, plotX, plotY, plotW, plotH, 0); ctx.clip();
+        for (b = 0; b < nbits; b++) {
+            var ry = plotY + b * rowH;
+            for (i = 0; i < n; i++) {
+                var v = rows[i][field]; if (isNaN(v)) continue;
+                var set = (Math.round(v) >> b) & 1;
+                ctx.fillStyle = set ? stateColor(b + 1) : 'rgba(255,255,255,0.04)';
+                ctx.fillRect(plotX + (i / n) * plotW, ry + 0.5, plotW / n + 0.5, Math.max(1, rowH - 1));
+            }
+        }
+        ctx.restore();
+        if (labW && rowH >= 7) {
+            ctx.font = '6px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+            for (b = 0; b < nbits; b++) {
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.fillText(labels ? labels[b] : ('b' + b), plotX - 3, plotY + b * rowH + rowH / 2);
+            }
+        }
+        var cur = rows[n - 1][field], setNow = 0;
+        if (!isNaN(cur)) for (b = 0; b < nbits; b++) if ((Math.round(cur) >> b) & 1) setNow++;
+        ctx.font = Math.min(9, Math.max(7, headerH * 0.62)) + 'px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText(name, x + 4, y + 3);
+        ctx.font = 'bold ' + Math.min(9, Math.max(7, headerH * 0.58)) + 'px monospace';
+        ctx.fillStyle = setNow ? '#ffb454' : 'rgba(255,255,255,0.45)'; ctx.textAlign = 'right';
+        ctx.fillText(setNow ? setNow + ' set' : 'clear', x + w - 4, y + 3);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
 
     // Time-based decimation: keep the first row in each interval bucket (with offset).
     function decimateRows(rows, intervalMs, offsetMs) {
@@ -647,7 +922,6 @@ define([
             this._roleFilter = 'all';      // 'all' | 'pair' | 'gain' | 'out'
             this._onlyUnstable = false;
             this._chipRects = [];
-            this._overviewRects = [];
             this._chartRects = [];
             this._chartArea = null;
             this._hoverIdx = -1;
@@ -670,6 +944,15 @@ define([
             this._labZoom = null; this._labBrush = null; this._labBrushing = false;
             // single-chart focus (double-click a chart to maximize it)
             this._focusChart = null; this._focusBackRect = null;
+            // multi-series grouped charts: active preset/adhoc group ids, adhoc defs,
+            // and the "group mode" lasso for bundling arbitrary signals.
+            this._groupsOn = {};        // groupId -> true (preset or adhoc currently charted)
+            this._adhoc = [];           // [{id, label, fields:[{sub,name,field}]}]
+            this._groupMode = false;    // collecting a pending ad-hoc group?
+            this._groupPending = {};    // paramId -> true while in group mode
+            this._activeGroups = [];    // resolved specs for this render (set in updateView)
+            this._consumed = {};        // field -> true: drawn by a group, so not individually
+            this._groupDelRects = [];   // hit rects for the ad-hoc group ✕ delete buttons
             // CSV export
             this._exportRows = null; this._toast = ''; this._toastUntil = 0; this._toastTimer = null;
             // persisted view state (#5)
@@ -835,6 +1118,8 @@ define([
                             if (c.act === 'lab') { self._labOpen = true; self._labCursor = null; self._labPin = null; }
                             else if (c.act === 'csv') { self._exportCSV(); }
                             else if (c.act === 'reset') { self._zoom = null; self._pinIdx = -1; if (self._rangeSelect) self._rangeSelect.value = 'all'; }
+                            else if (c.act === 'groupmode') { if (self._groupMode) self._createAdhocGroup(); else { self._groupMode = true; self._groupPending = {}; } }
+                            else if (c.act === 'groupcancel') { self._groupMode = false; self._groupPending = {}; }
                             self.invalidateUpdateView();
                             self._ptrDown = false; return;
                         }
@@ -902,20 +1187,24 @@ define([
                             self._ptrDown = false; return;
                         }
                     }
-                    // overview heatmap cell → toggle that parameter
-                    for (i = 0; i < self._overviewRects.length; i++) {
-                        var ov = self._overviewRects[i];
-                        if (p.x >= ov.x && p.x <= ov.x + ov.w && p.y >= ov.y && p.y <= ov.y + ov.h) {
-                            self._selected[ov.id] = !self._selected[ov.id];
+                    // GROUPS section: delete an ad-hoc group (✕). Test before the row rect
+                    // (the row spans full width and would otherwise swallow the click).
+                    for (i = 0; i < self._groupDelRects.length; i++) {
+                        var dr = self._groupDelRects[i];
+                        if (p.x >= dr.x && p.x <= dr.x + dr.w && p.y >= dr.y && p.y <= dr.y + dr.h) {
+                            self._deleteAdhoc(dr.del);
                             self.invalidateUpdateView();
                             self._ptrDown = false; return;
                         }
                     }
-                    // parameter list row → toggle that parameter
+                    // parameter list row → toggle that parameter (or, in group mode, add to
+                    // the pending set; group rows toggle that whole multi-series chart).
                     for (i = 0; i < self._listRects.length; i++) {
                         var lr = self._listRects[i];
                         if (p.x >= lr.x && p.x <= lr.x + lr.w && p.y >= lr.y && p.y <= lr.y + lr.h) {
-                            self._selected[lr.id] = !self._selected[lr.id];
+                            if (lr.gid) self._groupsOn[lr.gid] = !self._groupsOn[lr.gid];
+                            else if (self._groupMode) self._groupPending[lr.id] = !self._groupPending[lr.id];
+                            else self._selected[lr.id] = !self._selected[lr.id];
                             self.invalidateUpdateView();
                             self._ptrDown = false; return;
                         }
@@ -969,7 +1258,7 @@ define([
                     var cr = self._chartRects[i];
                     if (cr.cx != null && p.x >= cr.cx && p.x <= cr.cx + cr.cw && p.y >= cr.y && p.y <= cr.y + cr.h) {
                         self._focusChart = { kind: cr.kind, name: cr.name, sub: cr.sub,
-                            sp: cr.sp, act: cr.act, field: cr.field, accent: cr.accent };
+                            sp: cr.sp, act: cr.act, field: cr.field, members: cr.members, decode: cr.decode, accent: cr.accent };
                         self._pinIdx = -1; self._hoverActive = false;
                         self.invalidateUpdateView();
                         return;
@@ -993,6 +1282,46 @@ define([
             var items = secItems(sec), allOn = true;
             for (i = 0; i < items.length; i++) if (!this._selected[items[i].id]) { allOn = false; break; }
             for (i = 0; i < items.length; i++) this._selected[items[i].id] = !allOn;
+        },
+
+        // Map selected paramIds back to {sub, name, field} (pairs use the actual field).
+        _resolveParamIds: function(schema, ids) {
+            var map = {}, si, k, items, it;
+            for (si = 0; si < schema.length; si++) {
+                items = secItems(schema[si]);
+                for (k = 0; k < items.length; k++) {
+                    it = items[k];
+                    map[it.id] = { sub: schema[si].sub, name: it.name, field: it.kind === 'pair' ? it.d.act : it.d.field };
+                }
+            }
+            var out = [], i;
+            for (i = 0; i < ids.length; i++) if (map[ids[i]]) out.push(map[ids[i]]);
+            return out;
+        },
+
+        // Bundle the group-mode pending selection into a new ad-hoc multi-series chart.
+        _createAdhocGroup: function() {
+            var ids = [], k;
+            for (k in this._groupPending) if (this._groupPending.hasOwnProperty(k) && this._groupPending[k]) ids.push(k);
+            var fields = this._resolveParamIds(this._schema, ids);
+            if (fields.length < 2) { this._toastNow('Pick at least 2 signals to group'); return; }
+            var subs = {}, i;
+            for (i = 0; i < fields.length; i++) subs[fields[i].sub] = 1;
+            var subKeys = []; for (var s in subs) if (subs.hasOwnProperty(s)) subKeys.push(s);
+            var label = (subKeys.length === 1 ? subLabel(subKeys[0]).split(' ')[0] + ' group' : 'Custom group')
+                + ' · ' + fields.length;
+            var id = 'adhoc_' + Date.now().toString(36);
+            this._adhoc.push({ id: id, label: label, fields: fields });
+            this._groupsOn[id] = true;
+            this._groupMode = false; this._groupPending = {};
+            this._toastNow('Grouped ' + fields.length + ' signals into one chart');
+        },
+
+        _deleteAdhoc: function(id) {
+            var out = [], i;
+            for (i = 0; i < this._adhoc.length; i++) if (this._adhoc[i].id !== id) out.push(this._adhoc[i]);
+            this._adhoc = out;
+            delete this._groupsOn[id];
         },
 
         getInitialDataParams: function() {
@@ -1078,7 +1407,6 @@ define([
             var critPct = parseFloat(config[ns + 'errCritPct']) || 15;
             var scheme = config[ns + 'colorScheme'] || 'dark';
             var autoRot = (config[ns + 'modelAutoRotate'] || 'true') === 'true';
-            var showOverview = (config[ns + 'showOverview'] || 'true') === 'true';
             var showRowPreview = (config[ns + 'showRowPreview'] || 'true') === 'true';
             var sampleIntervalMs = parseFloat(config[ns + 'sampleIntervalMs']) || 0;
             var sampleOffsetMs = parseFloat(config[ns + 'sampleOffsetMs']) || 0;
@@ -1091,6 +1419,9 @@ define([
             var rows = decimateRows(data.rows, sampleIntervalMs, sampleOffsetMs);
             var schema = data.schema;
             this._schema = schema;
+            // Resolve which groups are active this render + which fields they consume
+            // (so a grouped signal isn't also drawn as its own chart).
+            this._resolveActiveGroups(schema);
             // #5 Apply a restored Range preset once, on the first render after reload.
             if (this._pendingRange) {
                 var pend = this._pendingRange; this._pendingRange = null;
@@ -1186,14 +1517,7 @@ define([
             var stripH = this._drawControlStrip(ctx, viewRows, pad, pad, accW);
             var topY = pad + stripH + 6;
 
-            // ── Overview heatmap band ──
             var accY = topY;
-            if (showOverview && schema.length) {
-                var ovH = this._drawOverview(ctx, schema, statusBySub, pad, topY, accW, h - pad - topY, scheme, pal);
-                accY = topY + ovH + 8;
-            } else {
-                this._overviewRects = [];
-            }
             var accH = h - pad - accY;
 
             // ── Accordion (left) — charts use the zoomed view window ──
@@ -1238,49 +1562,6 @@ define([
             this._manageRotation(autoRot);
         },
 
-        // Overview heatmap: one cell per parameter, coloured by status. Returns its height.
-        _drawOverview: function(ctx, schema, statusBySub, x, y, w, h, scheme, pal) {
-            this._overviewRects = [];
-            var items = [], si, k, sub;
-            for (si = 0; si < schema.length; si++) {
-                var its = secItems(schema[si]);
-                for (k = 0; k < its.length; k++) items.push({ it: its[k], sub: schema[si].sub, subIdx: si });
-            }
-            if (!items.length) return 0;
-
-            ctx.font = 'bold 9px sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-            ctx.fillText('Overview', x, y);
-            ctx.textAlign = 'right';
-            ctx.font = '8px sans-serif';
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.fillText('click to graph', x + w, y + 1);
-            ctx.textAlign = 'left';
-
-            var gy = y + 14;
-            var cell = 13, gap = 3;
-            var cols = Math.max(1, Math.floor((w + gap) / (cell + gap)));
-            var rowsN = Math.ceil(items.length / cols);
-            var maxRows = 4;
-            if (rowsN > maxRows) { rowsN = maxRows; }       // cap height; cells shrink to fit width only
-            for (k = 0; k < items.length; k++) {
-                var ci = k % cols, ri = Math.floor(k / cols);
-                if (ri >= maxRows) break;
-                var cx = x + ci * (cell + gap), cy = gy + ri * (cell + gap);
-                var rec = items[k];
-                var on = !!this._selected[rec.it.id];
-                var col = subAccent(rec.sub, rec.subIdx, scheme);   // colour = subsystem accent (matches line)
-                roundRect(ctx, cx, cy, cell, cell, 2);
-                ctx.fillStyle = on ? col : rgbaStr(col, 0.22);
-                ctx.fill();
-                if (on) { ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.stroke(); }
-                this._overviewRects.push({ id: rec.it.id, x: cx, y: cy, w: cell, h: cell });
-            }
-            var usedRows = Math.min(rowsN, Math.ceil(items.length / cols));
-            return 14 + usedRows * (cell + gap);
-        },
-
         // Vertical hover line across all charts + a value tooltip.
         _drawCrosshairAndEvents: function(ctx, rows) {
             var ca = this._chartArea;
@@ -1315,6 +1596,29 @@ define([
             if (t) { lines.push({ k: 'time', v: new Date(t * 1000).toLocaleTimeString(), d: '' }); }
             for (i = 0; i < this._chartRects.length; i++) {
                 var cr = this._chartRects[i];
+                if (cr.kind === 'multi') {
+                    lines.push({ k: cr.name, v: '(' + cr.members.length + ' ch)', d: '', col: cr.accent });
+                    var cap = Math.min(cr.members.length, 6), mi;
+                    for (mi = 0; mi < cap; mi++) {
+                        var mem = cr.members[mi];
+                        var mv = rows[idx][mem.field], md = '';
+                        if (hasPin) { var mpv = rows[pin][mem.field];
+                            if (!isNaN(mv) && !isNaN(mpv)) { var mdd = mv - mpv; md = (mdd >= 0 ? '+' : '') + fmtNum(mdd); } }
+                        lines.push({ k: '  ' + mem.name, v: fmtNum(mv), d: md, col: mem.color });
+                    }
+                    if (cr.members.length > cap) lines.push({ k: '  +' + (cr.members.length - cap) + ' more', v: '', d: '', col: cr.accent });
+                    continue;
+                }
+                if (cr.kind === 'state') {
+                    lines.push({ k: cr.name, v: decodeLabel(cr.decode, rows[idx][cr.field]), d: '', col: stateColor(rows[idx][cr.field]) });
+                    continue;
+                }
+                if (cr.kind === 'bits') {
+                    var bn = setBitNames(cr.decode, rows[idx][cr.field]);
+                    var bv = bn.length ? (bn.slice(0, 3).join(',') + (bn.length > 3 ? '…' : '')) : 'clear';
+                    lines.push({ k: cr.name, v: bv, d: '', col: bn.length ? '#ffb454' : cr.accent });
+                    continue;
+                }
                 var val = cr.kind === 'pair' ? rows[idx][cr.act] : rows[idx][cr.field];
                 var dtxt = '';
                 if (hasPin) {
@@ -1399,6 +1703,15 @@ define([
             btn('⚗ Lab', 'lab', this._labOpen);
             btn('⭳ CSV', 'csv', false);
             if (this._zoom) btn('⟲ reset zoom', 'reset', false);
+            // Group mode: bundle arbitrary signals into one multi-series chart.
+            var gpN = 0, gk;
+            for (gk in this._groupPending) if (this._groupPending.hasOwnProperty(gk) && this._groupPending[gk]) gpN++;
+            if (this._groupMode) {
+                btn('✓ create (' + gpN + ')', 'groupmode', true);
+                btn('✕ cancel', 'groupcancel', false);
+            } else {
+                btn('＋ group', 'groupmode', false);
+            }
 
             // "Range:" label sits just left of the HTML range <select> (drawn on the right)
             ctx.font = '8px sans-serif';
@@ -1429,6 +1742,19 @@ define([
                     } else {
                         cols.push({ header: base + '.' + it.kind, field: it.d.field });
                     }
+                }
+            }
+            // Also export signals charted via an active group (they may not be
+            // individually selected). Dedupe by field against what's already queued.
+            var seen = {}, ci2;
+            for (ci2 = 0; ci2 < cols.length; ci2++) seen[cols[ci2].field] = 1;
+            var ag = this._activeGroups || [];
+            for (si = 0; si < ag.length; si++) {
+                var gm = ag[si].members;
+                for (k = 0; k < gm.length; k++) {
+                    if (seen[gm[k].field]) continue;
+                    seen[gm[k].field] = 1;
+                    cols.push({ header: ag[si].label.replace(/[;\s]+/g, '_') + '.' + gm[k].name, field: gm[k].field });
                 }
             }
             if (!cols.length) { this._toastNow('No graphs selected to export'); return; }
@@ -1493,11 +1819,13 @@ define([
         _saveState: function() {
             try {
                 if (!window.localStorage) return;
-                var sel = [], col = [], k;
+                var sel = [], col = [], grp = [], k;
                 for (k in this._selected) if (this._selected.hasOwnProperty(k) && this._selected[k]) sel.push(k);
                 for (k in this._collapsed) if (this._collapsed.hasOwnProperty(k) && this._collapsed[k]) col.push(k);
+                for (k in this._groupsOn) if (this._groupsOn.hasOwnProperty(k) && this._groupsOn[k]) grp.push(k);
                 var st = { sel: sel, col: col, sort: this._sortMode, role: this._roleFilter,
-                           uns: !!this._onlyUnstable, range: this._rangeSelect ? this._rangeSelect.value : 'all' };
+                           uns: !!this._onlyUnstable, range: this._rangeSelect ? this._rangeSelect.value : 'all',
+                           grp: grp, adhoc: this._adhoc };
                 var s = JSON.stringify(st);
                 if (s === this._lastSavedState) return;   // only write on actual change
                 this._lastSavedState = s;
@@ -1522,6 +1850,9 @@ define([
                 if (st.role) this._roleFilter = st.role;
                 this._onlyUnstable = !!st.uns;
                 this._pendingRange = st.range || null;
+                this._adhoc = (st.adhoc && st.adhoc.length) ? st.adhoc : [];
+                this._groupsOn = {};
+                if (st.grp) for (i = 0; i < st.grp.length; i++) this._groupsOn[st.grp[i]] = true;
                 this._lastSavedState = s;
             } catch (e) {}
         },
@@ -1965,6 +2296,57 @@ define([
             this._labData = { mode: 'series', pts: lpts, xunit: useTime ? 's' : 'smp', xdom: [xd0, xd1] };
         },
 
+        // Resolve active groups (toggled-on presets + adhoc) into concrete chart specs,
+        // and the set of fields they consume (so those signals aren't drawn individually).
+        _resolveActiveGroups: function(schema) {
+            this._activeGroups = [];
+            this._consumed = {};
+            var i, j, g, members;
+            for (i = 0; i < PRESET_GROUPS.length; i++) {
+                g = PRESET_GROUPS[i];
+                if (!this._groupsOn[g.id]) continue;
+                members = resolvePreset(schema, g);
+                if (members.length < 2) continue;
+                this._activeGroups.push({ id: g.id, label: g.label, sub: g.sub, unit: g.unit || '', members: members });
+                for (j = 0; j < members.length; j++) this._consumed[members[j].field] = true;
+            }
+            for (i = 0; i < this._adhoc.length; i++) {
+                var a = this._adhoc[i];
+                if (!this._groupsOn[a.id]) continue;
+                members = []; var subs = {};
+                for (j = 0; j < a.fields.length; j++) {
+                    var fld = a.fields[j];
+                    members.push({ name: (fld.sub ? subLabel(fld.sub).split(' ')[0] + '·' : '') + fld.name, field: fld.field });
+                    subs[fld.sub] = 1;
+                }
+                if (members.length < 2) continue;
+                for (j = 0; j < members.length; j++) { members[j].color = seriesColor(j, members.length); this._consumed[members[j].field] = true; }
+                var subKeys = []; for (var sk in subs) if (subs.hasOwnProperty(sk)) subKeys.push(sk);
+                // Render under a single department: its own if shared, else the first
+                // member's (a mixed group has no natural home — park it under member 0).
+                this._activeGroups.push({ id: a.id, label: a.label,
+                    sub: subKeys.length === 1 ? subKeys[0] : a.fields[0].sub,
+                    unit: '', members: members, adhoc: true, mixed: subKeys.length > 1 });
+            }
+        },
+
+        _groupsForSub: function(sub) {
+            var out = [], i;
+            for (i = 0; i < this._activeGroups.length; i++) if (this._activeGroups[i].sub === sub) out.push(this._activeGroups[i]);
+            return out;
+        },
+
+        // Presets whose pattern resolves to ≥2 members in the current schema (the only
+        // ones worth listing). Returns [{preset, count}].
+        _availablePresets: function(schema) {
+            var out = [], i, m;
+            for (i = 0; i < PRESET_GROUPS.length; i++) {
+                m = resolvePreset(schema, PRESET_GROUPS[i]);
+                if (m.length >= 2) out.push({ preset: PRESET_GROUPS[i], count: m.length });
+            }
+            return out;
+        },
+
         _drawAccordion: function(ctx, rows, schema, statusBySub, x, y, w, h, warnPct, critPct, scheme, pal) {
             this._headerRects = [];
             this._focusBackRect = null;
@@ -1995,10 +2377,13 @@ define([
 
                 var fy = y + 20, fh = h - 22;
                 if (f.kind === 'pair') pairChart(ctx, rows, f.sp, f.act, f.name, x, fy, w, fh, f.accent, pal, warnPct, critPct);
+                else if (f.kind === 'multi') multiChart(ctx, rows, f.members, f.name, x, fy, w, fh, f.accent);
+                else if (f.kind === 'state') stateBand(ctx, rows, f.field, f.name, x, fy, w, fh, f.accent, f.decode);
+                else if (f.kind === 'bits') bitLane(ctx, rows, f.field, f.name, x, fy, w, fh, f.accent, f.decode);
                 else outChart(ctx, rows, f.field, f.name, x, fy, w, fh, f.accent);
                 var fpad = Math.min(3, fh * 0.05), faxis = (fh >= 40 && w >= 90) ? 28 : 0;
                 this._chartRects = [{ name: f.name, kind: f.kind, sub: f.sub, sp: f.sp, act: f.act,
-                    field: f.field, accent: f.accent, y: fy, h: fh, cx: x, cw: w }];
+                    field: f.field, members: f.members, decode: f.decode, accent: f.accent, y: fy, h: fh, cx: x, cw: w }];
                 this._chartArea = { x: x + fpad + faxis, y: fy + Math.min(15, Math.max(10, fh * 0.22)),
                     w: w - fpad * 2 - faxis, h: fh - Math.min(15, Math.max(10, fh * 0.22)) - fpad, n: rows.length };
                 return;
@@ -2012,11 +2397,12 @@ define([
                 for (j = 0; j < sc.pairs.length; j++)
                     if (self._selected[paramId(sc.sub, 'pair', sc.pairs[j].name)]) fp.push(sc.pairs[j]);
                 for (j = 0; j < sc.gains.length; j++)
-                    if (self._selected[paramId(sc.sub, 'gain', sc.gains[j].name)]) fg.push(sc.gains[j]);
+                    if (self._selected[paramId(sc.sub, 'gain', sc.gains[j].name)] && !self._consumed[sc.gains[j].field]) fg.push(sc.gains[j]);
                 for (j = 0; j < sc.outs.length; j++)
-                    if (self._selected[paramId(sc.sub, 'out', sc.outs[j].name)]) fo.push(sc.outs[j]);
-                if (fp.length + fg.length + fo.length > 0)
-                    vis.push({ sec: { sub: sc.sub, pairs: fp, gains: fg, outs: fo }, idx: si });
+                    if (self._selected[paramId(sc.sub, 'out', sc.outs[j].name)] && !self._consumed[sc.outs[j].field]) fo.push(sc.outs[j]);
+                var mg = self._groupsForSub(sc.sub);
+                if (fp.length + fg.length + fo.length + mg.length > 0)
+                    vis.push({ sec: { sub: sc.sub, pairs: fp, gains: fg, outs: fo, multis: mg }, idx: si });
             }
             if (vis.length === 0) {
                 ctx.font = '11px sans-serif';
@@ -2031,7 +2417,7 @@ define([
             var headerH = 22, gap = 6;
 
             function weight(sec) {
-                var charts = sec.pairs.length + sec.outs.length;
+                var charts = sec.pairs.length + sec.outs.length + (sec.multis ? sec.multis.length : 0);
                 var gainRows = sec.gains.length ? 1 : 0;
                 return Math.max(1, charts + gainRows);
             }
@@ -2112,7 +2498,13 @@ define([
             var charts = [];
             var i;
             for (i = 0; i < sec.pairs.length; i++) charts.push({ kind: 'pair', d: sec.pairs[i] });
-            for (i = 0; i < sec.outs.length; i++) charts.push({ kind: 'out', d: sec.outs[i] });
+            if (sec.multis) for (i = 0; i < sec.multis.length; i++) charts.push({ kind: 'multi', d: sec.multis[i] });
+            for (i = 0; i < sec.outs.length; i++) {
+                // discrete signals with a decode entry render as a state band / bit lane
+                var od = decodeFor(sec.sub, sec.outs[i].name);
+                var okind = od ? (od.kind === 'bits' ? 'bits' : 'state') : 'out';
+                charts.push({ kind: okind, d: sec.outs[i], decode: od });
+            }
             var remH = y + h - cy;
             if (charts.length && remH > 8) {
                 var ch = (remH - gap * (charts.length - 1)) / charts.length;
@@ -2128,6 +2520,19 @@ define([
                             x, cyy, w, ch, accent, pal, warnPct, critPct);
                         this._chartRects.push({ name: charts[i].d.name, kind: 'pair', sub: sec.sub,
                             sp: charts[i].d.sp, act: charts[i].d.act, accent: accent, y: cyy, h: ch, cx: x, cw: w });
+                    } else if (charts[i].kind === 'multi') {
+                        var grp = charts[i].d;
+                        multiChart(ctx, rows, grp.members, grp.label, x, cyy, w, ch, accent);
+                        this._chartRects.push({ name: grp.label, kind: 'multi', sub: sec.sub,
+                            members: grp.members, accent: accent, y: cyy, h: ch, cx: x, cw: w });
+                    } else if (charts[i].kind === 'state') {
+                        stateBand(ctx, rows, charts[i].d.field, charts[i].d.name, x, cyy, w, ch, accent, charts[i].decode);
+                        this._chartRects.push({ name: charts[i].d.name, kind: 'state', sub: sec.sub,
+                            field: charts[i].d.field, decode: charts[i].decode, accent: accent, y: cyy, h: ch, cx: x, cw: w });
+                    } else if (charts[i].kind === 'bits') {
+                        bitLane(ctx, rows, charts[i].d.field, charts[i].d.name, x, cyy, w, ch, accent, charts[i].decode);
+                        this._chartRects.push({ name: charts[i].d.name, kind: 'bits', sub: sec.sub,
+                            field: charts[i].d.field, decode: charts[i].decode, accent: accent, y: cyy, h: ch, cx: x, cw: w });
                     } else {
                         outChart(ctx, rows, charts[i].d.field, charts[i].d.name, x, cyy, w, ch, accent);
                         this._chartRects.push({ name: charts[i].d.name, kind: 'out', sub: sec.sub,
@@ -2175,7 +2580,7 @@ define([
             drawModel(ctx, x, modelTop, w, modelH, schema, wrapped, this._yaw, this._pitch, pal, partMap, this._hotspots, scheme);
 
             if (focused) {
-                this._listRect = null; this._listRects = []; this._listGroupRects = []; this._chipRects = [];
+                this._listRect = null; this._listRects = []; this._listGroupRects = []; this._groupDelRects = []; this._chipRects = [];
                 if (this._filterInput) this._filterInput.style.display = 'none';
                 return;
             }
@@ -2183,7 +2588,7 @@ define([
             // parameter selection list (bottom right)
             var listY = modelTop + modelH + 10;
             var listH = y + h - listY;
-            if (listH < 40) { this._listRect = null; this._listRects = []; this._listGroupRects = []; this._chipRects = [];
+            if (listH < 40) { this._listRect = null; this._listRects = []; this._listGroupRects = []; this._groupDelRects = []; this._chipRects = [];
                 if (this._filterInput) this._filterInput.style.display = 'none'; return; }
             this._drawParamList(ctx, rows, schema, statusBySub, x, listY, w, listH, scheme, pal, warnPct, critPct, showRowPreview);
         },
@@ -2192,6 +2597,7 @@ define([
         _drawParamList: function(ctx, rows, schema, statusBySub, x, y, w, h, scheme, pal, warnPct, critPct, showRowPreview) {
             this._listRects = [];
             this._listGroupRects = [];
+            this._groupDelRects = [];
             this._chipRects = [];
             var self = this;
             var filt = (this._filter || '').toLowerCase();
@@ -2267,8 +2673,24 @@ define([
 
             // Decide layout: grouped (sort=group) vs flat-by-error (sort=error)
             var grouped = (this._sortMode === 'group');
-            var display = [];   // sequence of {type:'group'|'row', ...}
+            var display = [];   // sequence of {type:'ghead'|'grow'|'group'|'row', ...}
             if (grouped) {
+                // GROUPS section (top): toggleable multi-series presets + ad-hoc groups.
+                var avail = this._availablePresets(schema), gi, grpRows = [];
+                for (gi = 0; gi < avail.length; gi++) {
+                    var pr = avail[gi].preset;
+                    if (filt && (pr.label + ' ' + pr.sub + ' group').toLowerCase().indexOf(filt) < 0) continue;
+                    grpRows.push({ gid: pr.id, label: pr.label, sub: pr.sub, count: avail[gi].count, adhoc: false });
+                }
+                for (gi = 0; gi < this._adhoc.length; gi++) {
+                    var ad = this._adhoc[gi];
+                    if (filt && (ad.label + ' group').toLowerCase().indexOf(filt) < 0) continue;
+                    grpRows.push({ gid: ad.id, label: ad.label, sub: '_mix', count: ad.fields.length, adhoc: true });
+                }
+                if (grpRows.length) {
+                    display.push({ type: 'ghead', count: grpRows.length });
+                    for (gi = 0; gi < grpRows.length; gi++) display.push({ type: 'grow', g: grpRows[gi] });
+                }
                 for (si = 0; si < schema.length; si++) {
                     var rowsForSub = [];
                     for (ti = 0; ti < flat.length; ti++) if (flat[ti].sub === schema[si].sub) rowsForSub.push(flat[ti]);
@@ -2289,7 +2711,7 @@ define([
             }
 
             var contentH = pad, di;
-            for (di = 0; di < display.length; di++) contentH += display[di].type === 'group' ? groupH : rowH;
+            for (di = 0; di < display.length; di++) contentH += (display[di].type === 'group' || display[di].type === 'ghead') ? groupH : rowH;
             this._listMaxScroll = Math.max(0, contentH - innerH + pad);
             if (this._listScroll > this._listMaxScroll) this._listScroll = this._listMaxScroll;
 
@@ -2299,7 +2721,52 @@ define([
             var cyc = innerY + pad - this._listScroll;
             for (di = 0; di < display.length; di++) {
                 var ent = display[di];
-                if (ent.type === 'group') {
+                if (ent.type === 'ghead') {
+                    if (cyc + groupH > innerY && cyc < innerY + innerH) {
+                        ctx.font = 'bold 9px sans-serif';
+                        ctx.fillStyle = 'rgba(108,92,231,0.95)';
+                        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                        ctx.fillText('GROUPS', x + pad, cyc + groupH / 2);
+                        ctx.font = '8px sans-serif';
+                        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                        ctx.textAlign = 'right';
+                        ctx.fillText('multi-series · click to chart', x + w - pad, cyc + groupH / 2 + 1);
+                        ctx.textAlign = 'left';
+                    }
+                    cyc += groupH;
+                } else if (ent.type === 'grow') {
+                    var gg = ent.g, gon = !!self._groupsOn[gg.gid];
+                    if (cyc + rowH > innerY && cyc < innerY + innerH) {
+                        var gmidY = cyc + rowH / 2;
+                        var gAcc = gg.sub === '_mix' ? '#9aa0aa' : subAccent(gg.sub, 0, scheme);
+                        ctx.beginPath(); ctx.arc(x + pad + 4, gmidY, 3, 0, Math.PI * 2);
+                        ctx.fillStyle = gAcc; ctx.fill();
+                        ctx.font = '10px sans-serif';
+                        ctx.fillStyle = gon ? gAcc : 'rgba(255,255,255,0.25)';
+                        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                        ctx.fillText(gon ? '◉' : '○', x + pad + 12, gmidY);
+                        ctx.font = '9px sans-serif';
+                        ctx.fillStyle = gon ? '#ffffff' : 'rgba(255,255,255,0.5)';
+                        ctx.fillText(gg.label, x + pad + 26, gmidY);
+                        // channel count + (for ad-hoc) a delete ✕
+                        var gtagX = x + w - pad;
+                        if (gg.adhoc) {
+                            ctx.font = '10px sans-serif';
+                            ctx.fillStyle = 'rgba(255,120,120,0.8)';
+                            ctx.textAlign = 'right';
+                            ctx.fillText('✕', gtagX, gmidY);
+                            self._groupDelRects.push({ del: gg.gid, x: gtagX - 10, y: cyc, w: 14, h: rowH });
+                            gtagX -= 14;
+                        }
+                        ctx.font = '7px monospace';
+                        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(gg.count + ' ch', gtagX, gmidY);
+                        ctx.textAlign = 'left';
+                        self._listRects.push({ gid: gg.gid, x: x, y: cyc, w: w, h: rowH });
+                    }
+                    cyc += rowH;
+                } else if (ent.type === 'group') {
                     if (cyc + groupH > innerY && cyc < innerY + innerH) {
                         ctx.font = 'bold 9px sans-serif';
                         ctx.fillStyle = ent.accent || 'rgba(255,255,255,0.5)';
@@ -2319,16 +2786,23 @@ define([
                     cyc += groupH;
                 } else {
                     var f = ent.f, on = !!self._selected[f.it.id];
+                    var pending = self._groupMode && !!self._groupPending[f.it.id];
                     if (cyc + rowH > innerY && cyc < innerY + innerH) {
                         var midY = cyc + rowH / 2;
+                        // group-mode: shade rows queued for the pending ad-hoc group
+                        if (pending) {
+                            roundRect(ctx, x + 1, cyc + 1, w - 2, rowH - 2, 3);
+                            ctx.fillStyle = 'rgba(108,92,231,0.22)'; ctx.fill();
+                        }
                         // subsystem colour dot (matches the chart line colour)
                         ctx.beginPath(); ctx.arc(x + pad + 4, midY, 3, 0, Math.PI * 2);
                         ctx.fillStyle = f.accent; ctx.fill();
-                        // toggle glyph
+                        // toggle glyph (group mode shows a +/• add marker instead of graph toggle)
                         ctx.font = '10px sans-serif';
-                        ctx.fillStyle = on ? f.accent : 'rgba(255,255,255,0.25)';
+                        ctx.fillStyle = self._groupMode ? (pending ? '#6C5CE7' : 'rgba(255,255,255,0.3)')
+                                                        : (on ? f.accent : 'rgba(255,255,255,0.25)');
                         ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-                        ctx.fillText(on ? '◉' : '○', x + pad + 12, midY);
+                        ctx.fillText(self._groupMode ? (pending ? '⊕' : '⊕') : (on ? '◉' : '○'), x + pad + 12, midY);
                         // name (+ subsystem prefix when flat)
                         ctx.font = '9px sans-serif';
                         ctx.fillStyle = on ? '#ffffff' : 'rgba(255,255,255,0.5)';

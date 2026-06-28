@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "harness",
-      "runtimeExecutable": "python",
+      "runtimeExecutable": "python3",
       "runtimeArgs": ["serve.py", "8099"],
       "port": 8099
     }

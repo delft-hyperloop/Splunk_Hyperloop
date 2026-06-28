@@ -1,0 +1,5 @@
+<nav search_view="search" color="#6C5CE7">
+  <view name="hyperloop_analysis" default="true" />
+  <view name="hyperloop_analysis_demo" />
+  <view name="search" />
+</nav>

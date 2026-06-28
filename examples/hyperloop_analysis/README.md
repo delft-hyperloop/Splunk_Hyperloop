@@ -21,13 +21,31 @@ Click **⚗ Lab** in the control strip to open a full-panel overlay (the in-viz 
 
 Every Lab plot has the same cursors as the main charts: a **hover crosshair** (vertical for the line plots, nearest-point highlight for the scatter) with a value tooltip, and a **pinned cursor** (click) that adds a delta readout. Each plot also supports **brush-to-zoom** — drag to magnify a region of the plot (a frequency band, a time window, or an X×Y box for the scatter); **double-click resets** the zoom. The Lab analyses whatever the `Range` menu selects. `✕ close` returns to the dashboard. Range, zoom, pins, focus, and lab selections are session-only (not persisted across reload).
 
+## Grouped charts (many signals in one graph)
+
+Related signals can be drawn as a **single multi-series chart** instead of one chart each — far more readable when a department has dozens of channels (24 drive currents, 16 motor temps, …). A **GROUPS** section at the top of the parameter list (in `sort: group` mode) drives this:
+
+- **Preset groups** — curated, schema-aware bundles you toggle like any signal. Each renders all its members as one auto-coloured multi-series chart with a shared Y-axis and (for small groups) a legend; the chart lives in the owning department's accordion section. The 30 presets cover every array family in the current schema: *HEMS real / requested currents*, *DC-bus & periphery voltages*, *Sensor data*, *Per-magnet airgaps*, *Drive status / diagnostics / control / error / timeout words*; *Right/Left phase currents*, *Gate-driver temps*, *Inverter bus voltages*, *Motor angles*, *Position*; *EMS temps*, *HEMS temps*, the four *Motor {L,R}-{front,back} temps* banks, *Coolant flow*, *Flow array*; *Pack cell V (max/min)*, *Pack voltages*, *Pack temp (max/min)*, *Pack currents*. A preset only appears when the current schema actually contains ≥2 of its members. Defining a new preset is one entry in the `PRESET_GROUPS` table in `visualization_source.js` (an `id`, `sub`, `label`, and a name `match` regex or explicit `names` list).
+- **Ad-hoc groups (group mode)** — click **`＋ group`** in the control strip to enter group mode, then click parameter-list rows to add them to a pending set (highlighted), and **`✓ create`** to bundle them into one chart; **`✕ cancel`** aborts. Members may span departments (the group is parked under the first member's section). Ad-hoc groups appear in the GROUPS list with a **`✕`** to delete them.
+- **Same interactions as any chart** — grouped charts share the hover crosshair (the tooltip lists each member's value, capped for big arrays), the pinned Δ cursor, and **double-click to maximize**. Signals shown via an active group are not also drawn individually. CSV export includes grouped members even when they aren't individually selected.
+- **Persistence** — which presets/ad-hoc groups are active (and their definitions) are saved to the browser with the rest of the view state and restored on reload.
+
+## Discrete signals (states, faults, bitmasks)
+
+Event-index signals that are really *states* or *flag words* are charted as purpose-built lanes instead of meaningless lines:
+
+- **State-timeline band** — scalar state machines (`pwr.state`, `sys.podstate`, `lev.state`/`command`, `prop.state{left,right}`, `pwr.failreason`) render as a horizontal band that changes colour per value, with the **decoded label** ("Precharge", "HV On", "Failure") drawn inside each run along the time axis. Value `0` reads as a neutral idle/none.
+- **Bit-lane grid** — bitmask words (`pwr.errorstatus`, `pwr.imdwarnings`) render as one row per named bit, lit when that bit is set, so "which fault fired when" is obvious. The header shows how many bits are set right now.
+- **Decode tables** live in the `ENUM_DECODE` registry in `visualization_source.js` (from the handoff §5). An entry with `labels: null` is treated as a state band that shows the raw integer (used where no name table exists yet). The hover crosshair and double-click-maximize work on these lanes too, showing the decoded state / set-bit names.
+
+To make a new signal render this way, add a `{ sub, name, kind: 'enum'|'bits', labels }` row to `ENUM_DECODE`. (24-channel words like `drivestatus` are charted as grouped multi-series lines by default; toggle the group off and the individual channels can be added to `ENUM_DECODE` as bit-lanes.)
+
 ## Browsing (built for large parameter counts)
 
 - **Filter box** — type to narrow the parameter list by name, subsystem, or role.
 - **Sort / quick-filters** — chips to sort the list worst-error-first, cycle the role filter (`all` → `pair` → `gain` → `out`), and show only unstable loops.
 - **Per-department on/off** — each department header in the parameter list carries an `◉ all` toggle (◉ all on · ◐ some on · ○ none): click the header to graph or hide that whole department's signals at once. (Clicking a pod hotspot does the same spatially.)
 - **Per-row previews** — each list row shows a status dot and a mini sparkline so you can judge a signal before graphing it.
-- **Overview heatmap** — a grid of every parameter (coloured by status) sits above the graphs; click a cell to graph that signal.
 - **Hover crosshair** — hovering the charts draws a synchronized vertical cursor with a tooltip of each graphed signal's value and the timestamp at that instant.
 - **Stats footer** — each chart shows min / max / avg when tall enough.
 - **CSV export** — the `⭳ CSV` button in the control strip downloads the currently-graphed signals over the current time window (separator `;`, decimal `.`, ISO timestamps, full header). If the browser blocks the download (e.g. a sandboxed iframe) it falls back to copying the CSV to the clipboard.
@@ -53,9 +71,9 @@ Roles render as:
 | `gain` | A readout chip: current value plus a drift sparkline. |
 | `out` | A plain output trace. A `sp` or `act` with no partner also falls back to an output trace. |
 
-The departments `sys`, `loc`, `lev`, `prop`, `therm`, `pwr` get friendly labels (System / FSM, Localization, Levitation, Propulsion, Thermal, Powertrain) — the six sections of `splunk_index_classification.md` — each with its own accent colour shared consistently across the section header, the chart line, the parameter-list label/dots, the overview cells, and the pod hotspot.
+The departments `sys`, `loc`, `lev`, `prop`, `therm`, `pwr` get friendly labels (System / S&C, Localization, Levitation, Propulsion, Thermal, Powertrain) — each with its own accent colour shared consistently across the section header, the chart line, the parameter-list label/dots, and the pod hotspot. (`loc` is recognised but the ground station forwards no localization signals right now, so it does not appear.)
 
-**Strict classification:** the viz charts **only** these six departments. Any `tune_*` column whose leading token is not one of them (e.g. an unlisted `tune_sense_and_control_*` subsystem) is **dropped entirely** — it will not appear as a stray department. To chart a new subsystem, add it to the `KNOWN_LABELS`/`ACCENTS` maps in `visualization_source.js` (and to the classification markdown). Adding a column within a known department adds to the view; removing it removes it.
+**Strict classification:** the viz charts **only** these six departments. Any `tune_*` column whose leading token is not one of them is **dropped entirely** — it will not appear as a stray department. To chart a new subsystem, add it to the `KNOWN_LABELS`/`ACCENTS` maps in `visualization_source.js`. Adding a column within a known department adds to the view; removing it removes it.
 
 ## Required Columns
 
@@ -71,53 +89,51 @@ At least one `tune_*` column. The viz adapts to whatever is present; nothing is 
 
 ## Datapoints (DH-X schema)
 
-The columns are the **complete** DH-X datapoint set from
-`splunk_index_classification.md` (the sole source of truth). **Both** METRIC- and
-EVENT-class datapoints are shown, grouped under the **same six subdepartments**
-as the doc — the metrics/events index split only governs the Splunk pipeline, not
-which subdepartment a signal appears under. Per-column index membership is listed
-in `README/index_membership.csv` (438 columns: 207 metrics, 231 events).
+The columns are the **complete set the ground station actually forwards today**,
+per `docs/splunk/splunk_app_handoff.md` (the sole source of truth — the live
+`mcatalog` wins if they ever disagree). **Both** metric- and event-index
+datapoints are shown, grouped under the **same five departments**. Per-column
+index membership is listed in `README/index_membership.csv`
+(**399 datapoints: 223 metric / 176 event**).
 
-Subdepartments (doc order): `sys` System / FSM · `loc` Localization · `lev`
-Levitation · `prop` Propulsion · `therm` Thermal (its own department) · `pwr`
-Powertrain. **Every array family is expanded to one column per channel** (real
-currents 0–23, DC-bus voltages 0–23, drive status/diagnostics/control words 0–23,
-motor temps FL1–BR4, flows L1–R6, …).
+Departments: `sys` System / S&C (1) · `lev` Levitation (275) · `prop` Propulsion
+(34) · `therm` Thermal (75) · `pwr` Powertrain (14). **Every array family is
+expanded to one column per channel** (real/requested currents, DC-bus & periphery
+voltages, drive status/diagnostics/control/error/timeout words, EMS/HEMS temps,
+the four motor-quadrant temp banks `motor{left,right}{front,back}{0..8}`, `flow{0..7}`,
+`flowarray{0..9}`, …).
 
-Rendering of event-class signals: states/enums/faults/flags/counters render as
-plain `out` step traces; PID gains render as `gain` chips. Opaque signals
-(hashes, raw CAN log, the unused DefaultDatatype sentinel) are omitted — they are
-not chartable. DECIDE items follow the doc's recommendations: control targets and
-prop target-velocity → METRIC `sp` (paired with actual); PID gains, position
-limits / max thrust, diagnostic counters → EVENT; HV/BMS low/high → EVENT
-(threshold breach flags).
+Setpoint↔actual pairs (auto error-band charts): `lev.z`, `lev.pitch`, `lev.roll`,
+`lev.yaw`, `prop.velocity`. `lev.yairgap.sp` has no actual partner → plain trace.
+Event-index signals (states/enums/faults/flags/counters) currently render as plain
+`out` step traces. No PID `gain` signals are emitted by the ground station, and the
+old FSM/heartbeat/system-check, laser-offset, body-attitude, legacy-thermal and
+HV/BMS-threshold families are **not forwarded** — they have been removed from the app.
 
 ## Search
 
 The demo generator in `default/savedsearches.conf` (`[Hyperloop Analysis - Demo]`)
-reproduces the full 438-column schema with `| makeresults`. For live data, the
-viz needs both indexes pivoted into one `tune_*` table. Pull the numeric metrics
-with `mstats`, the discrete states with a `stats`-pivot of the events index, then
-join on `_time`:
+reproduces the full 399-column schema with `| makeresults`. For live data both
+indexes already carry the canonical `{dept}.{signal}.{role}` name, so the pivot is
+a trivial dots→underscores rename (no remapping) — pull metrics with `mstats`,
+events with a `stats`-pivot, and merge on `_time`:
 
 ```spl
-| mstats avg(_value) WHERE index=telemetry_metrics BY metric_name span=1s
-| eval col = "tune_" . replace(metric_name, "\.", "_") . "_out"
-| xyseries _time col "avg(_value)"
+| mstats avg(_value) AS v WHERE index=telemetry_metrics AND metric_name="*" BY metric_name span=1s
+| eval col="tune_".replace(metric_name,"\.","_")
+| xyseries _time col v
 | append
     [ search index=telemetry_events
-    | timechart span=1s
-        last(lev.state) as tune_lev_state_out
-        last(sys.fsmstate) as tune_sys_fsmstate_out
-        /* …one clause per event signal you want charted… */ ]
-| stats values(*) as * by _time
+    | eval col="tune_".replace('event.name',"\.","_")
+    | bin _time span=1s
+    | stats last('event.value') AS v by _time col
+    | xyseries _time col v ]
+| stats values(*) AS * by _time
+| sort 0 _time
 ```
 
-Map the metric name to match the column convention `tune_{sub}_{name}_{role}`
-(e.g. emit `lev.z.act` so it becomes `tune_lev_z_act`; the setpoint/actual pairs
-then auto-chart with an error band). `README/index_membership.csv` lists every
-column and which index it comes from, so you can script the two halves of the
-query from it.
+`README/index_membership.csv` lists every column and which index it comes from, so
+you can script either half of the query from it.
 
 ## Configuration
 
@@ -125,7 +141,6 @@ query from it.
 | --- | --- | --- |
 | `errWarnPct` | Relative error (%) above which a loop is flagged "tuning" | `5` |
 | `errCritPct` | Relative error (%) above which a loop is flagged "unstable" | `15` |
-| `showOverview` | Show the all-parameters overview heatmap above the graphs | `true` |
 | `showRowPreview` | Show mini sparklines in the parameter-list rows | `true` |
 | `sampleIntervalMs` | Keep at most one data point per this many milliseconds (0 = all). Decimates the data for the charts and the Lab. | `0` |
 | `sampleOffsetMs` | Phase offset (ms) for the sampling interval — shifts which point is kept in each bucket. | `0` |

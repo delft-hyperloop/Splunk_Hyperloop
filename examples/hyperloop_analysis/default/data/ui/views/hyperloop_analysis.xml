@@ -1,0 +1,84 @@
+<dashboard version="1.1" theme="dark">
+  <label>Hyperloop Analysis — DH-X (Live)</label>
+  <description>
+    Run-analysis workbench for the Delft Hyperloop DH-X pod. Pivots the telemetry_metrics
+    and telemetry_events indexes into the tune_{dept}_{signal}_{role} contract the custom
+    visualization parses. Read-only.
+  </description>
+
+  <!-- Inputs drive the search time window and a couple of viz options. -->
+  <fieldset submitButton="false" autoRun="true">
+    <input type="time" token="tr" searchWhenChanged="true">
+      <label>Run window</label>
+      <!-- Historical + auto-refresh (NOT real-time: Splunk Cloud vetting rejects rt searches;
+           on Enterprise this is also the recommended pattern). The viz accumulates and
+           auto-decimates, so a wide window stays smooth. -->
+      <default>
+        <earliest>-5m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="scheme" searchWhenChanged="true">
+      <label>Colour scheme</label>
+      <choice value="dark">Dark</choice>
+      <choice value="neon">Neon</choice>
+      <default>dark</default>
+      <initialValue>dark</initialValue>
+    </input>
+    <input type="dropdown" token="decim" searchWhenChanged="true">
+      <label>Decimation</label>
+      <choice value="0">Full resolution</choice>
+      <choice value="50">~20 Hz (50 ms)</choice>
+      <choice value="200">~5 Hz (200 ms)</choice>
+      <choice value="1000">1 Hz (1000 ms)</choice>
+      <default>0</default>
+      <initialValue>0</initialValue>
+    </input>
+  </fieldset>
+
+  <row>
+    <panel>
+      <title>DH-X pod telemetry</title>
+      <viz type="hyperloop_analysis.hyperloop_analysis">
+        <search>
+          <!-- Both indexes already carry the canonical {dept}.{signal}.{role} name, so the
+               pivot is a trivial dots->underscores rename: metrics via mstats, events via a
+               stats-pivot, merged on _time. coalesce() tolerates events indexed either flat
+               (name/value) or nested (event.name/event.value). -->
+          <query><![CDATA[
+| mstats avg(_value) AS v WHERE index=telemetry_metrics AND metric_name="*" BY metric_name span=1s
+| eval col="tune_".replace(metric_name,"\.","_")
+| xyseries _time col v
+| append
+    [ search index=telemetry_events
+    | eval _n=coalesce('event.name', name), _v=coalesce('event.value', value)
+    | eval col="tune_".replace(_n,"\.","_")
+    | bin _time span=1s
+    | stats latest(_v) AS v by _time col
+    | xyseries _time col v ]
+| stats values(*) AS * by _time
+| sort 0 _time
+          ]]></query>
+          <earliest>$tr.earliest$</earliest>
+          <latest>$tr.latest$</latest>
+          <sampleRatio>1</sampleRatio>
+          <refresh>5s</refresh>
+          <refreshType>delay</refreshType>
+        </search>
+
+        <!-- Panel height (the viz wants room; it manages its own internal layout). -->
+        <option name="height">820</option>
+
+        <!-- Custom-viz options. Namespace = {app}.{viz}.{setting}. -->
+        <option name="hyperloop_analysis.hyperloop_analysis.errWarnPct">5</option>
+        <option name="hyperloop_analysis.hyperloop_analysis.errCritPct">15</option>
+        <option name="hyperloop_analysis.hyperloop_analysis.colorScheme">$scheme$</option>
+        <option name="hyperloop_analysis.hyperloop_analysis.modelAutoRotate">true</option>
+        <option name="hyperloop_analysis.hyperloop_analysis.partMap"></option>
+        <option name="hyperloop_analysis.hyperloop_analysis.showRowPreview">true</option>
+        <option name="hyperloop_analysis.hyperloop_analysis.sampleIntervalMs">$decim$</option>
+        <option name="hyperloop_analysis.hyperloop_analysis.sampleOffsetMs">0</option>
+      </viz>
+    </panel>
+  </row>
+</dashboard>
