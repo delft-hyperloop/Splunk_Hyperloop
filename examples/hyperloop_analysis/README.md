@@ -8,6 +8,7 @@ A control strip sits at the top of the charts column:
 
 - **Range menu** — a `Range` dropdown windows the data to a recent interval (All time / Last 5 min / 30 min / 1 hour / 6 hours / 24 hours). It drives **both** the charts and the Analysis Lab, computed relative to the latest sample. Available in the control strip and in the Lab header.
 - **Brush-to-zoom** — drag horizontally across the charts to zoom every chart (and the time axis) to that window. The `⟲ reset zoom` button (appears when zoomed) restores the full run; the Range menu shows "Custom (brushed)" while a brush window is active.
+- **Full-run minimap** — while zoomed, a thin strip above the charts shows the whole run with the current window highlighted, so you never lose the big picture; **click it to slide** the window along the run.
 - **Pin / Δ cursor** — single-click on the charts pins a cyan reference cursor; while hovering, the tooltip then shows the **delta** of every graphed signal between the pinned point and the cursor. Click again to unpin.
 - **Double-click to maximize** — double-click any chart to expand it to fill the column for a clearer view (with its own axis and cursors); double-click again, or use `✕ back`, to restore the stack.
 
@@ -42,12 +43,14 @@ To make a new signal render this way, add a `{ sub, name, kind: 'enum'|'bits', l
 
 ## Browsing (built for large parameter counts)
 
-- **Filter box** — type to narrow the parameter list by name, subsystem, or role.
+- **Type-to-focus search** — the search box narrows the parameter list live by name, subsystem, or role; press **Enter to graph every match** at once, **Esc to clear**. The header shows the live match count. Faster than scrolling hundreds of signals.
 - **Sort / quick-filters** — chips to sort the list worst-error-first, cycle the role filter (`all` → `pair` → `gain` → `out`), and show only unstable loops.
 - **Per-department on/off** — each department header in the parameter list carries an `◉ all` toggle (◉ all on · ◐ some on · ○ none): click the header to graph or hide that whole department's signals at once. (Clicking a pod hotspot does the same spatially.)
 - **Per-row previews** — each list row shows a status dot and a mini sparkline so you can judge a signal before graphing it.
 - **Hover crosshair** — hovering the charts draws a synchronized vertical cursor with a tooltip of each graphed signal's value and the timestamp at that instant.
-- **Stats footer** — each chart shows min / max / avg when tall enough.
+- **Semantic zoom** — charts adapt to their height: a small chart shows just a sparkline + a prominent current value; as it grows it gains a Y-axis, then a min/max/avg stats footer. Less ink when small, full detail when maximized.
+- **Units** — chart headers carry the engineering unit (`A`, `V`, `°C`, `mm/s`, `rad`, `m`, …) from the ground station's `dataflow.yaml`, shown in the label, the hover tooltip, and the maximized title.
+- **Calm palette** — the default scheme uses muted, low-saturation hues so 24-channel overlays read as a calm shape rather than noise; `neon` remains available for high-contrast displays.
 - **CSV export** — the `⭳ CSV` button in the control strip downloads the currently-graphed signals over the current time window (separator `;`, decimal `.`, ISO timestamps, full header). If the browser blocks the download (e.g. a sandboxed iframe) it falls back to copying the CSV to the clipboard.
 - **Persistent layout** — selection, collapsed sections, sort/role/unstable chips, and the active Range are saved to the browser and restored on reload (`localStorage` key `hyperloop_analysis.viewstate.v1`).
 - **Auto-decimation** — charts cap at ~3000 drawn points so long accumulating runs stay smooth; zooming into a window restores full detail, and CSV export always uses the un-thinned data.

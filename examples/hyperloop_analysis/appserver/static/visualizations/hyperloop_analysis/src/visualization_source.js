@@ -17,8 +17,11 @@ define([
     var ROLES = { sp: 1, act: 1, gain: 1, out: 1 };
     // Departments (subsystem token → friendly label + accent colour).
     var KNOWN_LABELS = { sys: 'System / S&C', loc: 'Localization', lev: 'Levitation', prop: 'Propulsion', therm: 'Thermal', pwr: 'Powertrain' };
-    var ACCENTS = { sys: '#ADB5BD', loc: '#00B4D8', lev: '#6C5CE7', prop: '#2DC653', therm: '#E63946', pwr: '#F4A261' };
-    var CYCLE = ['#6C5CE7', '#2DC653', '#F4A261', '#00B4D8', '#E63946', '#B5179E'];
+    // Relaxing standard palette: muted, low-saturation hues that sit calmly on the
+    // dark canvas so 24-channel overlays don't read as noise. (Status meaning still
+    // comes through warn/crit below; nominal signals are intentionally quiet.)
+    var ACCENTS = { sys: '#9aa3b2', loc: '#5fa8c7', lev: '#8f86d4', prop: '#74bd8c', therm: '#d68b86', pwr: '#d4b173' };
+    var CYCLE = ['#8f86d4', '#74bd8c', '#d4b173', '#5fa8c7', '#cf9088', '#b08cc6', '#7fb3aa', '#c8a16a'];
 
     // ── Colour helpers ──────────────────────────────────────────────
 
@@ -57,8 +60,8 @@ define([
             return { setpoint: 'rgba(255,255,255,0.5)', stable: '#00FF88', warn: '#FF9900',
                      crit: '#FF0055', neutral: '#7a7a8c', model: '#B400FF' };
         }
-        return { setpoint: 'rgba(255,255,255,0.5)', stable: '#2EC4B6', warn: '#F4A261',
-                 crit: '#E63946', neutral: '#6b7280', model: '#6C5CE7' };
+        return { setpoint: 'rgba(255,255,255,0.42)', stable: '#6fb89e', warn: '#d4b173',
+                 crit: '#cf8079', neutral: '#6b7280', model: '#8f86d4' };
     }
 
     function subAccent(sub, idx, scheme) {
@@ -320,6 +323,14 @@ define([
     ];
     function presetById(id) { for (var i = 0; i < PRESET_GROUPS.length; i++) if (PRESET_GROUPS[i].id === id) return PRESET_GROUPS[i]; return null; }
 
+    // Compact signed time delta for the crosshair (Δt vs the pinned cursor).
+    function fmtDur(s) {
+        var a = Math.abs(s);
+        if (a < 60) return a.toFixed(a < 10 ? 2 : 1) + 's';
+        var m = Math.floor(a / 60), r = Math.round(a - m * 60);
+        return m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
     // ── Enum / bitmask decoding ─────────────────────────────────────
     // Discrete event-index signals read poorly as line traces. A signal listed here
     // renders as a state-timeline band (`enum`) or a per-bit lane grid (`bits`)
@@ -363,12 +374,44 @@ define([
         return CYCLE[(v - 1) % CYCLE.length];
     }
 
+    // ── Units ───────────────────────────────────────────────────────
+    // Engineering unit per signal, taken verbatim from the ground station's
+    // config/dataflow.yaml (the source the producer emits in the metric `unit`
+    // field). Keyed by department + signal-name pattern; '' = unit-less.
+    var UNITS = [
+        { sub: 'lev', match: /^(z|zliftoff|y|yairgap)$/, unit: 'm' },
+        { sub: 'lev', match: /^(pitch|roll|yaw)$/, unit: 'rad' },
+        { sub: 'lev', match: /^sensordata\d+$/, unit: 'mm' },
+        { sub: 'lev', match: /^(realcurrents|requestedcurrents)\d+$/, unit: 'A' },
+        { sub: 'lev', match: /^(dcbusvoltage|peripheryvoltage)\d+$/, unit: 'V' },
+        { sub: 'lev', match: /^offsetairgaps\d+$/, unit: 'm' },
+        { sub: 'prop', match: /^position(interpolated)?$/, unit: 'm' },
+        { sub: 'prop', match: /^velocity$/, unit: 'mm/s' },
+        { sub: 'prop', match: /^currentangle(left|right)$/, unit: 'deg' },
+        { sub: 'prop', match: /^vbus(left|right)$/, unit: 'V' },
+        { sub: 'prop', match: /^(ia|ib|ic|id|iq)(left|right)$/, unit: 'A' },
+        { sub: 'prop', match: /^t[abc]gd(left|right)$/, unit: 'd°C' },
+        { sub: 'therm', match: /^(ems|hems)\d+$/, unit: '°C' },
+        { sub: 'therm', match: /^motor(left|right)(front|back)\d+$/, unit: '°C' },
+        { sub: 'therm', match: /^flow\d+$/, unit: '°C' },
+        { sub: 'pwr', match: /^(max|min|total|dclink)voltage$/, unit: 'V' },
+        { sub: 'pwr', match: /^(max|min)temp$/, unit: '°C' },
+        { sub: 'pwr', match: /^(ivt|pack)current$/, unit: 'A' },
+        { sub: 'pwr', match: /^isores$/, unit: 'kΩ' }
+    ];
+    function unitFor(sub, name) {
+        for (var i = 0; i < UNITS.length; i++) if (UNITS[i].sub === sub && UNITS[i].match.test(name)) return UNITS[i].unit;
+        return '';
+    }
+    // Append a unit suffix to a chart label (so headers/tooltips/maximize all show it).
+    function withUnit(name, unit) { return unit ? name + ' (' + unit + ')' : name; }
+
     // Line colour for series i of n in a multi-series chart. Small groups reuse the
     // categorical CYCLE; large array families ramp the hue so adjacent channels differ.
     function seriesColor(i, n) {
         if (n <= CYCLE.length) return CYCLE[i % CYCLE.length];
         var hue = Math.round((i / n) * 300);
-        return 'hsl(' + hue + ',72%,62%)';
+        return 'hsl(' + hue + ',45%,64%)';   // low saturation keeps big overlays calm
     }
 
     // Natural-order key for a name: its trailing integer (channel index), else -1.
@@ -417,9 +460,10 @@ define([
         if (minV === Infinity) { minV = 0; maxV = 1; }
         var span = maxV - minV; if (span < 1e-6) span = Math.abs(maxV) > 1e-6 ? Math.abs(maxV) * 0.1 : 1;
         var pTop = maxV + span * 0.12, pBot = minV - span * 0.12, range = pTop - pBot;
+        var det = chartDetail(h);
         var headerH = Math.min(15, Math.max(10, h * 0.22));
         var pad = Math.min(3, h * 0.05);
-        var axisW = (h >= 40 && w >= 90) ? 28 : 0;
+        var axisW = (det >= 1 && w >= 90) ? 28 : 0;
         var plotX = x + pad + axisW, plotW = w - pad * 2 - axisW, plotY = y + headerH, plotH = h - headerH - pad;
         if (plotH < 4) plotH = 4;
         function px(idx) { return plotX + (n > 1 ? (idx / (n - 1)) * plotW : plotW / 2); }
@@ -604,6 +648,10 @@ define([
         ctx.textBaseline = 'alphabetic';
     }
 
+    // Semantic-zoom tier from chart height: 0 = glance (sparkline + a prominent current
+    // value, no axis/stats), 1 = compact (axis + value), 2 = full (+ stats footer).
+    function chartDetail(h) { return h < 36 ? 0 : (h < 90 ? 1 : 2); }
+
     // Setpoint-vs-actual chart with shaded error band + relErr badge.
     function pairChart(ctx, rows, spField, actField, name, x, y, w, h, accent, pal, warnPct, critPct) {
         roundRect(ctx, x, y, w, h, 4);
@@ -622,9 +670,10 @@ define([
         if (span < 1e-6) span = Math.abs(maxV) > 1e-6 ? Math.abs(maxV) * 0.1 : 1;
         var pTop = maxV + span * 0.2, pBot = minV - span * 0.2, range = pTop - pBot;
 
+        var det = chartDetail(h);
         var headerH = Math.min(15, Math.max(10, h * 0.22));
         var pad = Math.min(3, h * 0.05);
-        var axisW = (h >= 40 && w >= 90) ? 28 : 0;
+        var axisW = (det >= 1 && w >= 90) ? 28 : 0;
         var plotX = x + pad + axisW, plotW = w - pad * 2 - axisW;
         var plotY = y + headerH, plotH = h - headerH - pad;
         if (plotH < 4) plotH = 4;
@@ -667,7 +716,7 @@ define([
         for (i = 0; i < n; i++) { v = rows[i][actField]; if (isNaN(v)) continue;
             if (!started) { ctx.moveTo(px(i), py(v)); started = true; } else ctx.lineTo(px(i), py(v)); }
         ctx.stroke();
-        drawStatsFooter(ctx, rows, actField, plotX, plotY, plotW, plotH);
+        if (det >= 2) drawStatsFooter(ctx, rows, actField, plotX, plotY, plotW, plotH);
         ctx.restore();
 
         // header: name + current actual + relErr badge
@@ -678,7 +727,7 @@ define([
         ctx.fillText(name, x + 4, y + 3);
 
         var curAct = rows[n - 1][actField];
-        ctx.font = 'bold ' + Math.min(10, Math.max(8, headerH * 0.66)) + 'px monospace';
+        ctx.font = 'bold ' + (det === 0 ? Math.min(13, Math.max(10, h * 0.42)) : Math.min(10, Math.max(8, headerH * 0.66))) + 'px monospace';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'right';
         ctx.fillText(fmtNum(curAct), x + w - 4, y + 2);
@@ -696,9 +745,10 @@ define([
         if (minV === Infinity) { minV = 0; maxV = 1; }
         var span = maxV - minV; if (span < 1e-6) span = Math.abs(maxV) > 1e-6 ? Math.abs(maxV) * 0.1 : 1;
         var pTop = maxV + span * 0.2, pBot = minV - span * 0.2, range = pTop - pBot;
+        var det = chartDetail(h);
         var headerH = Math.min(15, Math.max(10, h * 0.22));
         var pad = Math.min(3, h * 0.05);
-        var axisW = (h >= 40 && w >= 90) ? 28 : 0;
+        var axisW = (det >= 1 && w >= 90) ? 28 : 0;
         var plotX = x + pad + axisW, plotW = w - pad * 2 - axisW, plotY = y + headerH, plotH = h - headerH - pad;
         if (plotH < 4) plotH = 4;
         function px(idx) { return plotX + (n > 1 ? (idx / (n - 1)) * plotW : plotW / 2); }
@@ -716,7 +766,7 @@ define([
         for (i = 0; i < n; i++) { v = rows[i][field]; if (isNaN(v)) continue;
             if (!started) { ctx.moveTo(px(i), py(v)); started = true; } else ctx.lineTo(px(i), py(v)); }
         ctx.strokeStyle = accent; ctx.lineWidth = 1.4; ctx.stroke();
-        drawStatsFooter(ctx, rows, field, plotX, plotY, plotW, plotH);
+        if (det >= 2) drawStatsFooter(ctx, rows, field, plotX, plotY, plotW, plotH);
         ctx.restore();
         var labelFont = Math.min(9, Math.max(7, headerH * 0.62));
         ctx.font = labelFont + 'px sans-serif';
@@ -724,7 +774,7 @@ define([
         ctx.textAlign = 'left'; ctx.textBaseline = 'top';
         ctx.fillText(name, x + 4, y + 3);
         var cur = rows[n - 1][field];
-        ctx.font = 'bold ' + Math.min(10, Math.max(8, headerH * 0.66)) + 'px monospace';
+        ctx.font = 'bold ' + (det === 0 ? Math.min(13, Math.max(10, h * 0.42)) : Math.min(10, Math.max(8, headerH * 0.66))) + 'px monospace';
         ctx.fillStyle = '#ffffff'; ctx.textAlign = 'right';
         ctx.fillText(fmtNum(cur), x + w - 4, y + 2);
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -936,6 +986,8 @@ define([
             this._playing = false; this._playTimer = null;
             this._ctrlRects = []; this._scrubRect = null;
             this._viewLen = 0;
+            this._fullLen = 0;          // full (decimated) row count, for the minimap
+            this._minimapRect = null;   // hit rect for the full-run minimap (when zoomed)
             // analysis lab
             this._labOpen = false; this._labMode = 'op';
             this._labRects = []; this._labSelects = null;
@@ -970,7 +1022,7 @@ define([
             try { if (!this.el.style.position) this.el.style.position = 'relative'; } catch (e0) {}
             this._filterInput = document.createElement('input');
             this._filterInput.type = 'text';
-            this._filterInput.setAttribute('placeholder', 'Filter parameters');
+            this._filterInput.setAttribute('placeholder', '🔍  Search signals…  (Enter: graph matches · Esc: clear)');
             var fi = this._filterInput.style;
             fi.position = 'absolute'; fi.display = 'none'; fi.zIndex = '5';
             fi.font = '11px sans-serif'; fi.boxSizing = 'border-box'; fi.padding = '1px 6px';
@@ -981,6 +1033,23 @@ define([
                 self._filter = self._filterInput.value || '';
                 self._listScroll = 0;
                 self.invalidateUpdateView();
+            });
+            // Type-to-focus: Enter graphs every signal currently matching the filter,
+            // Esc clears the search. (Enter only acts when a search term is present, so
+            // it can never accidentally graph all 399 signals.)
+            this._filterInput.addEventListener('keydown', function(e) {
+                var k = e.key || '';
+                if (k === 'Escape' || k === 'Esc') {
+                    self._filterInput.value = ''; self._filter = ''; self._listScroll = 0;
+                    self.invalidateUpdateView();
+                } else if (k === 'Enter') {
+                    var ids = self._filteredIds || [];
+                    if (self._filter && ids.length) {
+                        for (var i = 0; i < ids.length; i++) self._selected[ids[i]] = true;
+                        self._toastNow('Graphed ' + ids.length + ' signal' + (ids.length === 1 ? '' : 's') + ' matching “' + self._filter + '”');
+                        self.invalidateUpdateView();
+                    }
+                }
             });
 
             // Range menu: quickly window the data to a recent interval (drives both views).
@@ -1157,6 +1226,23 @@ define([
 
                 if (self._ptrDown && !self._moved) {
                     var p = pos(e), i;
+                    // minimap → slide the zoom window so its centre lands where you clicked
+                    var mm = self._minimapRect;
+                    if (mm && self._zoom && p.x >= mm.x && p.x <= mm.x + mm.w && p.y >= mm.y && p.y <= mm.y + mm.h) {
+                        var Nf = self._fullLen;
+                        if (Nf > 1) {
+                            var width = self._zoom.i1 - self._zoom.i0;
+                            var fr = Math.max(0, Math.min(1, (p.x - mm.x) / mm.w));
+                            var ci0 = Math.round(fr * (Nf - 1)) - Math.floor(width / 2);
+                            if (ci0 < 0) ci0 = 0;
+                            if (ci0 + width > Nf - 1) ci0 = (Nf - 1) - width;
+                            self._zoom = { i0: ci0, i1: ci0 + width };
+                            self._pinIdx = -1;
+                            if (self._rangeSelect) self._rangeSelect.value = 'custom';
+                            self.invalidateUpdateView();
+                        }
+                        self._ptrDown = false; return;
+                    }
                     // model focus toggle button
                     var mb = self._modelBtnRect;
                     if (mb && p.x >= mb.x && p.x <= mb.x + mb.w && p.y >= mb.y && p.y <= mb.y + mb.h) {
@@ -1417,6 +1503,7 @@ define([
             var pal = buildPalette(scheme);
             // Optional global decimation: keep one point per interval (with offset).
             var rows = decimateRows(data.rows, sampleIntervalMs, sampleOffsetMs);
+            this._fullLen = rows.length;   // full span for the minimap (zoom indices are into `rows`)
             var schema = data.schema;
             this._schema = schema;
             // Resolve which groups are active this render + which fields they consume
@@ -1517,7 +1604,16 @@ define([
             var stripH = this._drawControlStrip(ctx, viewRows, pad, pad, accW);
             var topY = pad + stripH + 6;
 
+            // ── Full-run minimap (only while zoomed) — shows where the current window
+            //    sits in the whole run; click to slide the window. ──
             var accY = topY;
+            if (this._zoom) {
+                var mmH = 15;
+                this._drawMinimap(ctx, rows, pad, topY, accW, mmH);
+                accY = topY + mmH + 6;
+            } else {
+                this._minimapRect = null;
+            }
             var accH = h - pad - accY;
 
             // ── Accordion (left) — charts use the zoomed view window ──
@@ -1593,7 +1689,14 @@ define([
             // tooltip: timestamp + each visible chart's value (and Δ vs the pin)
             var lines = [];
             var t = rows[idx] ? rows[idx]._time : null;
-            if (t) { lines.push({ k: 'time', v: new Date(t * 1000).toLocaleTimeString(), d: '' }); }
+            if (t) {
+                var td = '';
+                if (hasPin && rows[pin]) {
+                    var dts = rows[idx]._time - rows[pin]._time;
+                    td = (dts >= 0 ? '+' : '-') + fmtDur(dts);
+                }
+                lines.push({ k: 'time', v: new Date(t * 1000).toLocaleTimeString(), d: td });
+            }
             for (i = 0; i < this._chartRects.length; i++) {
                 var cr = this._chartRects[i];
                 if (cr.kind === 'multi') {
@@ -1720,6 +1823,32 @@ define([
             ctx.fillText('Range', x + w - 116, y + h / 2);
             ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
             return h;
+        },
+
+        // Full-run minimap: a thin strip spanning the entire run with the current zoom
+        // window highlighted, so zooming never loses the big picture. Click to slide the
+        // window. Cheap — no per-sample drawing, just the track + window rect + extents.
+        _drawMinimap: function(ctx, rows, x, y, w, h) {
+            var N = rows.length;
+            this._minimapRect = { x: x, y: y, w: w, h: h };
+            roundRect(ctx, x, y, w, h, 3);
+            ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.fill();
+            if (this._zoom && N > 1) {
+                var f0 = this._zoom.i0 / (N - 1), f1 = this._zoom.i1 / (N - 1);
+                var wx0 = x + f0 * w, ww = Math.max(2, (f1 - f0) * w);
+                ctx.fillStyle = 'rgba(143,134,212,0.28)'; ctx.fillRect(wx0, y, ww, h);
+                ctx.strokeStyle = 'rgba(143,134,212,0.85)'; ctx.lineWidth = 1;
+                ctx.strokeRect(wx0 + 0.5, y + 0.5, ww - 1, h - 1);
+            }
+            ctx.font = '7px sans-serif'; ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            if (N > 0) {
+                ctx.textAlign = 'left'; ctx.fillText(new Date(rows[0]._time * 1000).toLocaleTimeString(), x + 4, y + h / 2);
+                ctx.textAlign = 'right'; ctx.fillText(new Date(rows[N - 1]._time * 1000).toLocaleTimeString(), x + w - 4, y + h / 2);
+            }
+            ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,0.28)';
+            ctx.fillText('full run · click to move', x + w / 2, y + h / 2);
+            ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         },
 
         // #3 Export the currently-graphed signals over the current time window as CSV
@@ -2516,14 +2645,16 @@ define([
                 for (i = 0; i < charts.length; i++) {
                     var cyy = cy + i * (ch + gap);
                     if (charts[i].kind === 'pair') {
-                        pairChart(ctx, rows, charts[i].d.sp, charts[i].d.act, charts[i].d.name,
+                        var pLbl = withUnit(charts[i].d.name, unitFor(sec.sub, charts[i].d.name));
+                        pairChart(ctx, rows, charts[i].d.sp, charts[i].d.act, pLbl,
                             x, cyy, w, ch, accent, pal, warnPct, critPct);
-                        this._chartRects.push({ name: charts[i].d.name, kind: 'pair', sub: sec.sub,
+                        this._chartRects.push({ name: pLbl, kind: 'pair', sub: sec.sub,
                             sp: charts[i].d.sp, act: charts[i].d.act, accent: accent, y: cyy, h: ch, cx: x, cw: w });
                     } else if (charts[i].kind === 'multi') {
                         var grp = charts[i].d;
-                        multiChart(ctx, rows, grp.members, grp.label, x, cyy, w, ch, accent);
-                        this._chartRects.push({ name: grp.label, kind: 'multi', sub: sec.sub,
+                        var gLbl = withUnit(grp.label, grp.members.length ? unitFor(grp.sub, grp.members[0].name) : '');
+                        multiChart(ctx, rows, grp.members, gLbl, x, cyy, w, ch, accent);
+                        this._chartRects.push({ name: gLbl, kind: 'multi', sub: sec.sub,
                             members: grp.members, accent: accent, y: cyy, h: ch, cx: x, cw: w });
                     } else if (charts[i].kind === 'state') {
                         stateBand(ctx, rows, charts[i].d.field, charts[i].d.name, x, cyy, w, ch, accent, charts[i].decode);
@@ -2534,8 +2665,9 @@ define([
                         this._chartRects.push({ name: charts[i].d.name, kind: 'bits', sub: sec.sub,
                             field: charts[i].d.field, decode: charts[i].decode, accent: accent, y: cyy, h: ch, cx: x, cw: w });
                     } else {
-                        outChart(ctx, rows, charts[i].d.field, charts[i].d.name, x, cyy, w, ch, accent);
-                        this._chartRects.push({ name: charts[i].d.name, kind: 'out', sub: sec.sub,
+                        var oLbl = withUnit(charts[i].d.name, unitFor(sec.sub, charts[i].d.name));
+                        outChart(ctx, rows, charts[i].d.field, oLbl, x, cyy, w, ch, accent);
+                        this._chartRects.push({ name: oLbl, kind: 'out', sub: sec.sub,
                             field: charts[i].d.field, accent: accent, y: cyy, h: ch, cx: x, cw: w });
                     }
                 }
@@ -2618,6 +2750,10 @@ define([
                         err: err, field: it.kind === 'pair' ? it.d.act : it.d.field });
                 }
             }
+            // Remember the currently-matching ids so Enter (type-to-focus) can graph them.
+            var fids = []; for (k = 0; k < flat.length; k++) fids.push(flat[k].it.id);
+            this._filteredIds = fids;
+
             var total = 0, selCount = 0, ti;
             for (si = 0; si < schema.length; si++) { items = secItems(schema[si]);
                 for (k = 0; k < items.length; k++) { total++; if (self._selected[items[k].id]) selCount++; } }
@@ -2630,7 +2766,7 @@ define([
             ctx.font = '8px sans-serif';
             ctx.fillStyle = 'rgba(255,255,255,0.3)';
             ctx.textAlign = 'right';
-            ctx.fillText(selCount + ' / ' + total + ' shown', x + w, y + 1);
+            ctx.fillText(filt ? (flat.length + ' match · ↵ graph all') : (selCount + ' / ' + total + ' shown'), x + w, y + 1);
             ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 
             // filter input overlay (positioned over the canvas)
@@ -2865,7 +3001,10 @@ define([
             var self = this;
             if (autoRot && !this._rotTimer) {
                 this._rotTimer = setInterval(function() {
-                    if (!self._ptrDown) {
+                    // Don't churn the canvas while the user is reading a tooltip or has a
+                    // chart maximized — the model isn't the focus then, and the re-render
+                    // would otherwise make the crosshair's sample time drift with the clock.
+                    if (!self._ptrDown && !self._hoverActive && !self._focusChart && !self._labOpen) {
                         self._yaw += 0.012;
                         self.invalidateUpdateView();
                     }
